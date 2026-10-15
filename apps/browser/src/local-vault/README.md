@@ -59,13 +59,15 @@ Everything else is new: the files in this directory and in `native-host/`, the s
 check them, `test-local-vault.yml` and `lint-local-vault.yml` in `.github/workflows/`, and the
 action that builds the local vault for them, `.github/actions/build-local-vault/`.
 
-| File                                                   | Change                                                                                                                                               |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/platform/background.ts`                           | Imports `local-vault/browser/install-background` first.                                                                                              |
-| `src/popup/main.ts`                                    | Imports `local-vault/browser/install-foreground` first.                                                                                              |
-| `src/platform/services/browser-environment.service.ts` | Overrides `buildEnvironment`.                                                                                                                        |
-| `src/manifest.json`, `src/manifest.v3.json`            | Firefox: `nativeMessaging` is a required permission, and the extension has an ID of its own.                                                         |
-| `../../.github/workflows/build-browser.yml`            | Runs the tests of the local vault before every other job, and builds with the local vault that they built, from the submodule that the sources have. |
+| File                                                   | Change                                                                                                                                                          |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/platform/background.ts`                           | Imports `local-vault/browser/install-background` first.                                                                                                         |
+| `src/popup/main.ts`                                    | Imports `local-vault/browser/install-foreground` first.                                                                                                         |
+| `src/platform/services/browser-environment.service.ts` | Overrides `buildEnvironment`.                                                                                                                                   |
+| `src/manifest.json`, `src/manifest.v3.json`            | The name, description, author and homepage are those of this fork. Firefox: `nativeMessaging` is a required permission, and the extension has an ID of its own. |
+| `src/platform/badge/badge-browser-api.ts`              | Firefox: the title of the sidebar is the name of this fork.                                                                                                     |
+| `src/autofill/browser/main-context-menu-handler.ts`    | The title of the context menu is the name of this fork.                                                                                                         |
+| `../../.github/workflows/build-browser.yml`            | Runs the tests of the local vault before every other job, and builds with the local vault that they built, from the submodule that the sources have.            |
 
 ## Building
 

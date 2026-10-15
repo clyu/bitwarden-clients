@@ -1,12 +1,12 @@
 {
   "manifest_version": 2,
-  "name": "__MSG_extName__",
-  "short_name": "Bitwarden",
+  "name": "Localwarden",
+  "short_name": "Localwarden",
   "version": "2026.10.0",
-  "description": "__MSG_extDesc__",
+  "description": "Unofficial fork of the Bitwarden extension that works without a server and keeps the vault in a folder on this device",
   "default_locale": "en",
-  "author": "Bitwarden Inc.",
-  "homepage_url": "https://bitwarden.com",
+  "author": "Leon Yu",
+  "homepage_url": "https://github.com/clyu/bitwarden-clients",
   "icons": {
     "16": "images/icon16.png",
     "32": "images/icon32.png",
@@ -40,7 +40,7 @@
       "19": "images/icon19.png",
       "38": "images/icon38.png"
     },
-    "default_title": "Bitwarden",
+    "default_title": "Localwarden",
     "default_popup": "popup/index.html"
   },
   "permissions": [
@@ -162,7 +162,7 @@
     }
   },
   "__firefox__sidebar_action": {
-    "default_title": "Bitwarden",
+    "default_title": "Localwarden",
     "default_panel": "popup/index.html?uilocation=sidebar",
     "default_icon": "images/icon19.png",
     "open_at_install": false,
