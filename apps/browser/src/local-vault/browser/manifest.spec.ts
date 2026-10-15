@@ -1,7 +1,11 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 
-import { LOCAL_VAULT_NATIVE_HOST } from "./local-vault-environment";
+import {
+  LOCAL_VAULT_HOST,
+  LOCAL_VAULT_NATIVE_HOST,
+  LOCAL_VAULT_URLS,
+} from "./local-vault-environment";
 
 const BROWSER = join(__dirname, "..", "..", "..");
 const NATIVE_MESSAGING = "nativeMessaging";
@@ -57,6 +61,22 @@ describe("the manifests of the extension", () => {
       // Firefox only lets the extension with this ID start the helper.
       expect(installerConstant("EXTENSION_ID")).toBeTruthy();
       expect(settings.gecko.id).toBe(installerConstant("EXTENSION_ID"));
+    },
+  );
+
+  it.each(["manifest.json", "manifest.v3.json"])(
+    "tell Firefox in %s what leaves the machine",
+    (name) => {
+      const { gecko } = manifest(name).__firefox__browser_specific_settings;
+
+      // Firefox shows this when the extension is installed, and addons.mozilla.org does not sign
+      // an extension without it. What the helper writes stays on this machine. What leaves it are
+      // the domains of the items in the vault, which go to the icon service for their icons.
+      // Should the icons no longer come from a server, the declaration becomes `["none"]`.
+      expect(LOCAL_VAULT_URLS.icons).not.toContain(LOCAL_VAULT_HOST);
+      expect(gecko.data_collection_permissions).toEqual({ required: ["browsingActivity"] });
+      // Firefox asks for the consent itself from version 140 on. An older one would not ask.
+      expect(Number.parseFloat(gecko.strict_min_version)).toBeGreaterThanOrEqual(140);
     },
   );
 
