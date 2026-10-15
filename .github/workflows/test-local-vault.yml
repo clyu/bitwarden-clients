@@ -1,0 +1,92 @@
+# Runs the tests of the local vault, which stands in for the Bitwarden server in the browser
+# extension. They are what tells whether an update from upstream broke it: see "Updating from
+# upstream" in apps/browser/src/local-vault/README.md.
+#
+# build-browser.yml calls this, and builds nothing unless these tests pass. That is also when
+# they run: for a pull request and for a push to main. It builds the extension with the local
+# vault that these tests ran, which is built here from the submodule.
+
+name: Test Local Vault
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions: {}
+
+jobs:
+  extension:
+    name: Local server and extension
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Get Node Version
+        id: retrieve-node-version
+        run: |
+          NODE_NVMRC=$(cat .nvmrc)
+          NODE_VERSION=${NODE_NVMRC/v/''}
+          echo "node_version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+          node-version: ${{ steps.retrieve-node-version.outputs.node_version }}
+
+      - name: Print environment
+        run: |
+          node --version
+          npm --version
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build the local vault
+        uses: ./.github/actions/build-local-vault
+
+      # Run with the configuration of the extension, and not with the one at the root of the
+      # repository: that one measures the coverage of every project, whatever tests are run.
+      - name: Run the tests of the local vault
+        working-directory: apps/browser
+        run: npx jest src/local-vault --ci --maxWorkers=2
+
+      - name: Upload the local vault
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: local-vault-wasm
+          path: apps/browser/local-vault-rs/pkg/
+          if-no-files-found: error
+
+  helper:
+    name: Local vault helper
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Print environment
+        run: python3 --version
+
+      - name: Run the tests of the helper
+        working-directory: apps/browser/native-host
+        run: python3 -m unittest -v

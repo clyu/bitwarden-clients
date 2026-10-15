@@ -71,6 +71,7 @@
     "clipboardWrite",
     "contextMenus",
     "idle",
+    "nativeMessaging",
     "scripting",
     "storage",
     "tabs",
@@ -98,7 +99,7 @@
     "webRequestAuthProvider"
   ],
   "optional_permissions": ["nativeMessaging", "privacy"],
-  "__firefox__optional_permissions": ["nativeMessaging", "privacy"],
+  "__firefox__optional_permissions": ["privacy"],
   "__safari__optional_permissions": null,
   "host_permissions": ["https://*/*", "http://*/*"],
   "content_security_policy": {
@@ -174,7 +175,7 @@
   ],
   "__firefox__browser_specific_settings": {
     "gecko": {
-      "id": "{446900e4-71c2-419f-a6a7-df9c091e268b}",
+      "id": "localwarden@local.invalid",
       "strict_min_version": "91.0"
     }
   },
