@@ -67,6 +67,9 @@ action that builds the local vault for them, `.github/actions/build-local-vault/
 | `src/manifest.json`, `src/manifest.v3.json`            | The name, description, author and homepage are those of this fork. Firefox: `nativeMessaging` is a required permission, the extension has an ID of its own, and it says that it sends browsing activity (for website icons), which needs Firefox 140. |
 | `src/platform/badge/badge-browser-api.ts`              | Firefox: the title of the sidebar is the name of this fork.                                                                                                                                                                                           |
 | `src/autofill/browser/main-context-menu-handler.ts`    | The title of the context menu is the name of this fork.                                                                                                                                                                                               |
+| `src/background/nativeMessaging.background.ts`         | Does not start trying to connect to the desktop app every ten seconds; it connects when a message is sent.                                                                                                                                            |
+| `src/background/native-messaging.background.spec.ts`   | Tests that it does not try to connect when it is created.                                                                                                                                                                                             |
+| `src/platform/ipc/ipc-background.service.ts`           | Does not initialize the transport to the desktop app, which would try to connect to it every ten seconds.                                                                                                                                             |
 | `../../.github/workflows/build-browser.yml`            | Runs the tests of the local vault before every other job, and builds with the local vault that they built, from the submodule that the sources have.                                                                                                  |
 
 ## Building
@@ -145,8 +148,9 @@ changes on two devices at once lose one side; changes arrive at the next sync. I
   Android app; the extension logs out at its next sync and logs in with the new one.
 - An attachment is held in memory as a whole. One that is larger than 256 MB is refused: the app
   sends it in blocks, which the local server does not put together.
-- With `nativeMessaging` granted, the extension also tries to reach the Bitwarden desktop app
-  for biometric unlock every ten seconds, as upstream does, which the browser console shows.
+- The extension does not try to reach the Bitwarden desktop app every ten seconds, as upstream
+  does. It reaches it for biometric unlock only when the settings of the account ask whether
+  that is available, so until then the lock screen does not offer it.
 - Website icons are loaded from the icon service of Bitwarden, which tells it which websites are
   in the vault. Turn off "Show website icons" to avoid that. This is the browsing activity that
   Firefox says the extension sends when it is installed (`data_collection_permissions` in the

@@ -66,8 +66,10 @@ export class IpcBackgroundService extends IpcService {
       });
 
       if (!this.platformUtilsService.isSafari()) {
+        // Not initialized, so that it does not try to connect to the desktop app every ten seconds:
+        // nothing uses it while the local server reports no feature flags. Sending fails as when
+        // the desktop app is not running.
         this.desktopTransport = new DesktopIpcTransport(this.client, this.logService, receive);
-        this.desktopTransport.init();
       }
     } catch (e) {
       this.logService.error("[IPC] Initialization failed", e);
