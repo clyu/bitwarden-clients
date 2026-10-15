@@ -45,9 +45,17 @@ permissions:
   contents: read
 
 jobs:
+  # The local vault stands in for the Bitwarden server, so an extension is not built unless the
+  # tests of the local vault pass. Every other job needs `setup`, and so waits for them.
+  local-vault-tests:
+    name: Local Vault Tests
+    uses: ./.github/workflows/test-local-vault.yml
+
   setup:
     name: Setup
     runs-on: ubuntu-22.04
+    needs:
+      - local-vault-tests
     outputs:
       repo_url: ${{ steps.gen_vars.outputs.repo_url }}
       adj_build_number: ${{ steps.gen_vars.outputs.adj_build_number }}
@@ -159,12 +167,14 @@ jobs:
       _BUILD_NUMBER: ${{ needs.setup.outputs.adj_build_number }}
       _NODE_VERSION: ${{ needs.setup.outputs.node_version }}
     steps:
+      # The local vault is a submodule of apps/browser, which the sources have.
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
           allow-unsafe-pr-checkout: true
+          submodules: true
 
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -308,6 +318,13 @@ jobs:
       - name: NPM setup
         run: npm ci
         working-directory: browser-source/
+
+      # The local vault that the tests of the local vault built from the submodule, and ran.
+      - name: Download the local vault
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: local-vault-wasm
+          path: browser-source/apps/browser/local-vault-rs/pkg
 
       - name: Remove commercial packages
         if: ${{ matrix.license_type.type == 'oss' }}
@@ -520,6 +537,13 @@ jobs:
       - name: NPM setup
         run: npm ci
         working-directory: ./
+
+      # The local vault that the tests of the local vault built from the submodule, and ran.
+      - name: Download the local vault
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: local-vault-wasm
+          path: apps/browser/local-vault-rs/pkg
 
       - name: Remove commercial packages
         if: ${{ matrix.license_type.type == 'oss' }}
