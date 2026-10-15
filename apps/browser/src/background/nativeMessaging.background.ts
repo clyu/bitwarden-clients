@@ -90,11 +90,7 @@ export class NativeMessagingBackground {
     private platformUtilsService: PlatformUtilsService,
     private logService: LogService,
     private accountService: AccountService,
-  ) {
-    // Always try to keep a connection to the Bitwarden Desktop app alive so that there is no wait
-    // when biometrics are used. `connect` is a no-op when the native messaging permission is missing.
-    this.startConnecting();
-  }
+  ) {}
 
   async connect() {
     if (!(await BrowserApi.permissionsGranted(["nativeMessaging"]))) {
