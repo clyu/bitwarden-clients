@@ -89,8 +89,6 @@ describe("NativeMessagingBackground", () => {
       logService,
       accountService,
     );
-    // The constructor starts a reconnection loop; stop it so tests can drive connect() explicitly.
-    sut.stopConnecting();
   });
 
   describe("constructor", () => {
@@ -145,7 +143,7 @@ describe("NativeMessagingBackground", () => {
       expect(connectSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("starts the reconnection loop on construction", () => {
+    it("does not attempt to connect on construction", () => {
       const instance = new NativeMessagingBackground(
         encryptService,
         cryptoFunctionService,
@@ -156,11 +154,9 @@ describe("NativeMessagingBackground", () => {
       );
       const instanceConnectSpy = jest.spyOn(instance, "connect").mockResolvedValue(undefined);
 
-      jest.advanceTimersByTime(0);
+      jest.advanceTimersByTime(30_000);
 
-      expect(instanceConnectSpy).toHaveBeenCalledTimes(1);
-
-      instance.stopConnecting();
+      expect(instanceConnectSpy).not.toHaveBeenCalled();
     });
 
     it("retries every 10 seconds while not connected", () => {
