@@ -5,10 +5,14 @@ import { firstValueFrom } from "rxjs";
 import { AccountService } from "@bitwarden/common/auth/abstractions/account.service";
 import { Region, RegionConfig } from "@bitwarden/common/platform/abstractions/environment.service";
 import { LogService } from "@bitwarden/common/platform/abstractions/log.service";
-import { DefaultEnvironmentService } from "@bitwarden/common/platform/services/default-environment.service";
+import {
+  DefaultEnvironmentService,
+  SelfHostedEnvironment,
+} from "@bitwarden/common/platform/services/default-environment.service";
 import { StateProvider } from "@bitwarden/common/platform/state";
 
 import { GroupPolicyEnvironment } from "../../admin-console/types/group-policy-environment";
+import { LOCAL_VAULT_URLS } from "../../local-vault/browser/local-vault-environment";
 import { devFlagEnabled, devFlagValue } from "../flags";
 
 export class BrowserEnvironmentService extends DefaultEnvironmentService {
@@ -19,6 +23,14 @@ export class BrowserEnvironmentService extends DefaultEnvironmentService {
     additionalRegionConfigs: RegionConfig[] = [],
   ) {
     super(stateProvider, accountService, additionalRegionConfigs);
+  }
+
+  /**
+   * There is no server to choose: whatever is selected or stored, the addresses are those that
+   * the local vault answers at, which never reach a server.
+   */
+  protected override buildEnvironment() {
+    return new SelfHostedEnvironment({ ...LOCAL_VAULT_URLS });
   }
 
   async hasManagedEnvironment(): Promise<boolean> {

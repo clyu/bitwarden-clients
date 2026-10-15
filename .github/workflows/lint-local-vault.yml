@@ -1,0 +1,129 @@
+# Checks the code of the local vault the way upstream checks its own code: ESLint, prettier and
+# the types. No build waits for this.
+#
+# Jest does not check types, and the build leaves the tests out, so the types of the tests of the
+# local vault are checked nowhere else. The local vault is built first, for its types.
+
+name: Lint Local Vault
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - 'apps/browser/**'
+      - 'libs/**'
+      - '*'
+      - '!*.md'
+      - '!*.txt'
+      - '.github/workflows/lint-local-vault.yml'
+      - '.github/actions/build-local-vault/**'
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'apps/browser/**'
+      - 'libs/**'
+      - '*'
+      - '!*.md'
+      - '!*.txt'
+      - '.github/workflows/lint-local-vault.yml'
+      - '.github/actions/build-local-vault/**'
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ESLint, prettier and types of the local vault
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Get Node Version
+        id: retrieve-node-version
+        run: |
+          NODE_NVMRC=$(cat .nvmrc)
+          NODE_VERSION=${NODE_NVMRC/v/''}
+          echo "node_version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+          node-version: ${{ steps.retrieve-node-version.outputs.node_version }}
+
+      - name: Install Node dependencies
+        id: install
+        run: npm ci
+
+      - name: Build the local vault
+        id: local-vault
+        uses: ./.github/actions/build-local-vault
+
+      - name: Run ESLint
+        run: npx eslint apps/browser/src/local-vault
+
+      # Each of the checks that follow runs whatever the ones before it found.
+      - name: Check the formatting
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npx prettier --check apps/browser/src/local-vault apps/browser/native-host
+
+      - name: Check the types, those of the tests among them
+        if: ${{ !cancelled() && steps.local-vault.outcome == 'success' }}
+        run: npx tsc --project apps/browser/src/local-vault/tsconfig.spec.json
+
+  types:
+    name: Types of the repository
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Get Node Version
+        id: retrieve-node-version
+        run: |
+          NODE_NVMRC=$(cat .nvmrc)
+          NODE_VERSION=${NODE_NVMRC/v/''}
+          echo "node_version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+          node-version: ${{ steps.retrieve-node-version.outputs.node_version }}
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build the local vault
+        uses: ./.github/actions/build-local-vault
+
+      # The libraries, and every file that is held to the strict rules, which those of the local
+      # vault are.
+      - name: Run typechecking
+        run: npm run test:types
