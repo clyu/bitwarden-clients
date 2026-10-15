@@ -176,7 +176,10 @@
   "__firefox__browser_specific_settings": {
     "gecko": {
       "id": "localwarden@local.invalid",
-      "strict_min_version": "91.0"
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["browsingActivity"]
+      }
     }
   },
   "__firefox__sidebar_action": {
