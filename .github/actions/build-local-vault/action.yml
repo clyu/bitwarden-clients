@@ -1,0 +1,34 @@
+# Builds the local vault, which is the submodule apps/browser/local-vault-rs, as the WebAssembly
+# package that the extension imports: see "Building" in apps/browser/src/local-vault/README.md.
+#
+# The repository has to be checked out with its submodules, and the Node dependencies installed
+# before this: Rust builds in node_modules/.cache, which `npm ci` removes.
+
+name: Build Local Vault
+description: Builds the local vault of the browser extension as WebAssembly.
+
+runs:
+  using: composite
+  steps:
+    # Installs the toolchain that rust-toolchain.toml pins, and adds the target to it.
+    - name: Set up Rust
+      shell: bash
+      working-directory: apps/browser/local-vault-rs
+      run: |
+        rustup show
+        rustup target add wasm32-unknown-unknown
+
+    - name: Cache the build of the local vault
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        workspaces: apps/browser/local-vault-rs -> ../../../node_modules/.cache/local-vault-rs
+
+    - name: Install wasm-pack
+      uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      with:
+        tool: wasm-pack
+
+    - name: Build the local vault
+      shell: bash
+      working-directory: apps/browser
+      run: src/local-vault/build-local-vault.sh

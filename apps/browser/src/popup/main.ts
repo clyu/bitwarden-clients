@@ -1,3 +1,6 @@
+// The local vault stands in for the Bitwarden server. It has to be in place before anything else.
+import "../local-vault/browser/install-foreground";
+
 import { enableProdMode, provideZoneChangeDetection } from "@angular/core";
 import { platformBrowser } from "@angular/platform-browser";
 
