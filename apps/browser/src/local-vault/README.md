@@ -59,15 +59,15 @@ Everything else is new: the files in this directory and in `native-host/`, the s
 check them, `test-local-vault.yml` and `lint-local-vault.yml` in `.github/workflows/`, and the
 action that builds the local vault for them, `.github/actions/build-local-vault/`.
 
-| File                                                   | Change                                                                                                                                                          |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/platform/background.ts`                           | Imports `local-vault/browser/install-background` first.                                                                                                         |
-| `src/popup/main.ts`                                    | Imports `local-vault/browser/install-foreground` first.                                                                                                         |
-| `src/platform/services/browser-environment.service.ts` | Overrides `buildEnvironment`.                                                                                                                                   |
-| `src/manifest.json`, `src/manifest.v3.json`            | The name, description, author and homepage are those of this fork. Firefox: `nativeMessaging` is a required permission, and the extension has an ID of its own. |
-| `src/platform/badge/badge-browser-api.ts`              | Firefox: the title of the sidebar is the name of this fork.                                                                                                     |
-| `src/autofill/browser/main-context-menu-handler.ts`    | The title of the context menu is the name of this fork.                                                                                                         |
-| `../../.github/workflows/build-browser.yml`            | Runs the tests of the local vault before every other job, and builds with the local vault that they built, from the submodule that the sources have.            |
+| File                                                   | Change                                                                                                                                                                                                                                                |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/platform/background.ts`                           | Imports `local-vault/browser/install-background` first.                                                                                                                                                                                               |
+| `src/popup/main.ts`                                    | Imports `local-vault/browser/install-foreground` first.                                                                                                                                                                                               |
+| `src/platform/services/browser-environment.service.ts` | Overrides `buildEnvironment`.                                                                                                                                                                                                                         |
+| `src/manifest.json`, `src/manifest.v3.json`            | The name, description, author and homepage are those of this fork. Firefox: `nativeMessaging` is a required permission, the extension has an ID of its own, and it says that it sends browsing activity (for website icons), which needs Firefox 140. |
+| `src/platform/badge/badge-browser-api.ts`              | Firefox: the title of the sidebar is the name of this fork.                                                                                                                                                                                           |
+| `src/autofill/browser/main-context-menu-handler.ts`    | The title of the context menu is the name of this fork.                                                                                                                                                                                               |
+| `../../.github/workflows/build-browser.yml`            | Runs the tests of the local vault before every other job, and builds with the local vault that they built, from the submodule that the sources have.                                                                                                  |
 
 ## Building
 
@@ -148,4 +148,6 @@ changes on two devices at once lose one side; changes arrive at the next sync. I
 - With `nativeMessaging` granted, the extension also tries to reach the Bitwarden desktop app
   for biometric unlock every ten seconds, as upstream does, which the browser console shows.
 - Website icons are loaded from the icon service of Bitwarden, which tells it which websites are
-  in the vault. Turn off "Show website icons" to avoid that.
+  in the vault. Turn off "Show website icons" to avoid that. This is the browsing activity that
+  Firefox says the extension sends when it is installed (`data_collection_permissions` in the
+  manifests).
