@@ -56,6 +56,11 @@ const MASTER_PASSWORD: string = V1.method.masterPasswordUnlock.password;
 // What the local server knows the master password by, where a test does not need the real one.
 const PASSWORD_HASH = "cGFzc3dvcmQtaGFzaA==";
 
+// The installation of the extension, and the file of the vault of the account that it writes,
+// which holds the whole vault as long as no other device has written it.
+const DEVICE_ID = "device";
+const VAULT_FILE = [USER_ID, "devices", DEVICE_ID, "vault.json"];
+
 // What only the client may read. None of it can be part of Base64, so finding it in the vault
 // folder means that it was stored as it is.
 const NAME = "The name of the item";
@@ -139,6 +144,7 @@ async function start(
   const logged: string[] = [];
   const server = new LocalServer(
     fileSystem,
+    DEVICE_ID,
     () => new Date(),
     (_, message) => logged.push(message),
   );
@@ -279,10 +285,11 @@ async function registerAndLogIn(
   // The local server gives a new account an ID of its own. The SDK encrypts for the account
   // that it knows, so its vault has to be the one of that ID.
   const [registeredId] = await fileSystem.list([]);
-  const vault = JSON.parse(utf8Decode(fileSystem.files.get(`${registeredId}/vault.json`)!));
+  const registeredFile = `${registeredId}/devices/${DEVICE_ID}/vault.json`;
+  const vault = JSON.parse(utf8Decode(fileSystem.files.get(registeredFile)!));
   vault.sync.profile.id = USER_ID;
   await fileSystem.delete([registeredId]);
-  await fileSystem.write([USER_ID, "vault.json"], utf8Encode(JSON.stringify(vault)));
+  await fileSystem.write(VAULT_FILE, utf8Encode(JSON.stringify(vault)));
 
   const login = await logIn(server, passwordHash);
   expect(login.code).toBe(200);
@@ -296,7 +303,7 @@ function logIn(server: LocalServer, passwordHash: string): Promise<LocalResponse
 }
 
 function vaultFile(vault: LocalVault): string {
-  return utf8Decode(vault.fileSystem.files.get(`${USER_ID}/vault.json`)!);
+  return utf8Decode(vault.fileSystem.files.get(VAULT_FILE.join("/"))!);
 }
 
 /**
@@ -661,7 +668,7 @@ describe("the Bitwarden SDK with the state of the app, on a local vault", () => 
       // The vault of an account that has another user key: the same item is not taken there.
       const other = JSON.parse(vaultFile(vault));
       other.sync.userDecryption.userKeyId = "00000000000000000000000000000000";
-      await vault.fileSystem.write([USER_ID, "vault.json"], utf8Encode(JSON.stringify(other)));
+      await vault.fileSystem.write(VAULT_FILE, utf8Encode(JSON.stringify(other)));
       await expect(vault.cipherSdkService.createWithServer(view, USER_ID)).rejects.toMatchObject({
         message: expect.stringContaining("not encrypted with the user key of this account"),
       });

@@ -44,13 +44,31 @@ popup, sidebar                          background page
 - **The local server is the local vault of the Android app.** It is written once, in Rust, in
   the repository `clyu/local-vault-rs`, which is the submodule `local-vault-rs/` of the extension
   and of the app, so that both read and write the vault folder the same way. The extension runs
-  it as WebAssembly. `server/local-server.ts` hands it the vault folder, the clock and the
-  requests as they are (method, address, headers, body): which service a request is for, whose
-  it is and what its form holds is worked out by the local vault, as it is for the app. The
-  local vault also stores and reads the content of attachments, which the extension has in
-  memory, under the same lock as the request. What it answers differently for this client is
-  the master password hint: a 400 and not a 429, as this client replaces the message of a 429.
-  The README of `local-vault-rs` lists where the implementations that came before it differed.
+  it as WebAssembly. `server/local-server.ts` hands it the vault folder, the clock, the ID of this
+  installation of the extension and the requests as they are (method, address, headers, body):
+  which service a request is for, whose it is and what its form holds is worked out by the local
+  vault, as it is for the app. The local vault also stores and reads the content of attachments,
+  which the extension has in memory, under the same lock as the request. What it answers
+  differently for this client is the master password hint: a 400 and not a 429, as this client
+  replaces the message of a 429. The README of `local-vault-rs` lists where the implementations
+  that came before it differed.
+- **Every installation writes a directory of its own.** The local vault writes the changes of
+  the extension to `<account id>/devices/<device id>/` of the vault folder, which no other device
+  writes, and puts the vault together from the directories of every device, so that a tool that
+  syncs the folder never has two versions of a file to choose from. The ID is a random UUID that
+  is made the first time that the background starts (`browser/local-vault-device-id.ts`), and kept
+  in the local storage of the extension under `localVaultDeviceId`, which no other browser has:
+  two browsers, or two profiles, that use the same vault folder are two devices. A copy of the
+  profile, such as one moved to another computer or restored from a backup there, has the ID as
+  well: as long as the profile that it was copied from uses the vault folder too, the two write
+  the same file, and the tool that syncs the folder keeps the changes of only one of them. Remove
+  the extension from the copy and install it again before it uses the vault folder. If the ID
+  cannot be read or kept, the requests fail until it can, as `server/local-server.ts` reads it
+  again for each request until it has it, once more for a request that was waiting for it as
+  well: an ID that is not kept would leave a new directory in the vault folder every time.
+  Removing the extension takes the ID with it, so once it is installed again it writes a
+  directory of its own, and the one before stays in the vault folder. That one must not be
+  deleted by hand, as part of the vault may be only in it.
 
 ## What is changed in upstream files
 
@@ -100,7 +118,42 @@ that they built.
 3. Commit the submodule, which records the commit that it is at.
 
 The Android app has `local-vault-rs` as well. A change to the format of the vault folder has to
-reach both before either of them writes it.
+reach both before either of them writes it. Version 2, in which every device writes a directory
+of its own, is such a change. The first write of an updated client takes a vault of version 1
+over, and once that has come to a client that knows only version 1, that client does not write
+the account, but does not have it either:
+
+- Its requests for the account are refused as unauthorized, which logs the account out.
+- The email of the account is taken to belong to no account, so the master key is derived with
+  the default KDF settings, and the master password is taken to be wrong.
+- The email can be registered again. An updated client then has two accounts with that email,
+  and logs in to the first of them, by their IDs, that the master password is right for, which
+  can be the new, empty one.
+
+Until it has come, that client still changes the vault of version 1, and a tool that syncs the
+folder can keep the vault that it writes in place of the `vault.json` of version 2. The updated
+clients then take that vault over again. An item that it changed is kept as it changed it if that
+change is the later one, and one that it deleted stays deleted unless an updated client changed
+it after taking the vault over. What an updated client changed of the account, the master
+password included, is kept over that vault, which does not say when it changed either of them:
+a change of the master password on the client of version 1 is lost.
+
+So the Android app is released with such a change before the extension, or at the same time,
+and not after it: a browser can update the extension before the user has updated the app.
+
+A client of version 2 deals with a file of a later version better. It fails the requests of the
+account, and those that look for an account by an email that no other account has, as ones that
+did not reach the server, until it is updated: it does not log the account out, take the master
+password to be wrong, or let the email be registered again. The account cannot be used on a
+client that does not have the next change of the format yet, but nothing else goes wrong there.
+
+The `vault.json` that says that an account was deleted (`LOCAL_VAULT_FORMAT.md`, "Deleting an
+account") is a change of the same kind, the other way round. A client from before it takes such
+an account for one of a layout that it does not know, which it leaves alone. But it deletes the
+whole directory of an account that it deletes, which can leave behind the file of a device that
+changed the vault while the deletion was on its way to it. An updated client takes that file for
+an account whose other files are still on their way, for good: its requests, and those for an
+email that no other account has, fail until the directory is deleted by hand.
 
 ## Updating from upstream
 
@@ -138,15 +191,51 @@ reach both before either of them writes it.
 
 ## Limits
 
-Those of the Android app apply: no organizations, Sends, two-step login or single sign-on;
-changes on two devices at once lose one side; changes arrive at the next sync. In addition:
+Those of the Android app apply: no organizations, Sends, two-step login or single sign-on; of
+changes to the same item on two devices at once, only the later one is kept; changes arrive at
+the next sync; a deletion is forgotten after 90 days, so a device that changed the item before
+it was deleted and comes back later than that brings it back. In addition:
 
+- A tool that syncs the vault folder brings the files of the devices in no particular order.
+  Once any file of an account has come, but not yet the one that holds the account, the requests
+  of the account fail as ones that did not reach the server, and so does looking for an account
+  by an email that no other account has, to log in or to register. A device that gets the files
+  of the others more than 90 days late can be without an item until the file with its newer
+  version comes too.
+- If the file that holds an account never comes, those requests keep failing on every device
+  that shares the vault folder, registering a new account and logging in with a mistyped email
+  included. They fail as if the server could not be reached, and the console of the background
+  page has a warning that starts with `Local server cannot use account <account id>` and says
+  that the vault of the account has not fully come to this device yet. The ID is the name of the
+  directory of the account in the vault folder. Such a directory is usually what is left of an
+  account that a client from before version 2 deleted, or that lost the directory of a device to
+  a deletion by hand: its `vault.json` is missing or only says that it is of version 2, and none of
+  the files `devices/<device id>/vault.json` in it has `account` in its `records`, or none has
+  `masterPassword` there. Once every device that shares the folder has synced, delete that
+  directory by hand, as the local vault cannot use it without the file that never came. If the
+  warning says instead that a newer client wrote the vault, update the extension.
 - Firefox with manifest version 2 is what this is made for. Nothing is known to break in other
   browsers, but nothing was tried, and the helper is only installed for Firefox. The manifest of
   version 3 has the same changes, but was not tried either: there the browser stops the
   background when it is idle, which the local server was not made for.
 - Changing the master password opens the web vault, which does not exist here. Change it in the
   Android app; the extension logs out at its next sync and logs in with the new one.
+- Changing the master password is not enough if someone else may know the old one. The user key
+  stays the same, and the vault folder keeps it encrypted with the old master password: in the
+  directory of every device until that device next changes the vault, or syncs a day or more
+  after it last looked through its file for what other devices replaced, which it also does at
+  its first sync after its background starts, and at the sync after one where it could not; in
+  the backup of that file until the device writes the file again; and for good in the directory
+  of an installation that was removed, which nothing writes anymore and which must not be deleted
+  by hand. The extension mostly leaves the old one out of its file soon after the change comes:
+  at the sync that brings it, if it last looked through its file a day or more before, or else
+  at its first sync after you log in with the new master password, as the extension restarts
+  when it logs out, unless another of its accounts is unlocked, or the one that it switches to is
+  locked with a PIN that has "Require master password on browser restart" on. The backup of its
+  file then holds the old one until the extension next writes that file. Whoever has the old
+  master password and a copy of the folder can decrypt the vault, items added since included.
+  Export the vault, import it into a new account, and delete the old account, which deletes the
+  files of every device, and what a tool that syncs the folder left in its directory.
 - An attachment is held in memory as a whole. One that is larger than 256 MB is refused: the app
   sends it in blocks, which the local server does not put together.
 - The extension does not try to reach the Bitwarden desktop app every ten seconds, as upstream

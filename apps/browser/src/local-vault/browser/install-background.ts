@@ -1,9 +1,11 @@
 import { ConsoleLogService } from "@bitwarden/common/platform/services/console-log.service";
 
 import { BrowserApi } from "../../platform/browser/browser-api";
+import BrowserLocalStorageService from "../../platform/services/browser-local-storage.service";
 import { LocalServer } from "../server/local-server";
 
 import { deserializeRequest, installLocalFetch, serializeResponse } from "./local-fetch";
+import { localVaultDeviceId } from "./local-vault-device-id";
 import { LOCAL_VAULT_NATIVE_HOST } from "./local-vault-environment";
 import {
   LOCAL_VAULT_PORT_NAME,
@@ -25,8 +27,11 @@ const logService = new ConsoleLogService(false);
 const fileSystem = new NativeMessagingLocalVaultFileSystem(() =>
   BrowserApi.connectNative(LOCAL_VAULT_NATIVE_HOST),
 );
+const extensionStorage = new BrowserLocalStorageService(logService);
 const localServer = new LocalServer(
   fileSystem,
+  // Read again for the next request if it cannot be read.
+  () => localVaultDeviceId(extensionStorage),
   () => new Date(),
   // The levels of the local server are methods of the log service.
   (level, message) => logService[level](message),
