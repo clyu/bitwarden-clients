@@ -62,6 +62,7 @@ import { LOCAL_VAULT_URLS } from "./local-vault-environment";
 
 const EMAIL = "user@example.com";
 const PASSWORD_HASH = "cGFzc3dvcmQtaGFzaA==";
+const DEVICE_ID = "device";
 const ENCRYPTED =
   "2.aXZpdml2aXZpdml2aXZpdg==|ZGF0YQ==|bWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWE=";
 const USER_KEY = ENCRYPTED as unknown as MasterKeyWrappedUserKey;
@@ -89,7 +90,7 @@ describe("the API services of the app on a local vault", () => {
 
   beforeEach(() => {
     fileSystem = new InMemoryLocalVaultFileSystem();
-    const server = new LocalServer(fileSystem);
+    const server = new LocalServer(fileSystem, DEVICE_ID);
     globalThis.fetch = nativeFetch;
     installLocalFetch((request) => server.handle(request));
 
@@ -188,11 +189,6 @@ describe("the API services of the app on a local vault", () => {
         }),
       ),
     );
-  }
-
-  function vaultFile(): any {
-    const userId: string = decodeJwtTokenToJson(accessToken!).sub;
-    return JSON.parse(new TextDecoder().decode(fileSystem.files.get(`${userId}/vault.json`)));
   }
 
   /**
