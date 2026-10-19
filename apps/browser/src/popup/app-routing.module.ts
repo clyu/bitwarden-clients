@@ -79,6 +79,7 @@ import { PhishingWarningComponent } from "../dirt/phishing-detection/popup/phish
 import { ProtectedByComponent } from "../dirt/phishing-detection/popup/protected-by-component";
 // The local vault is the only one there is, so there is no server to choose.
 import { LocalVaultEnvironmentComponent as EnvironmentSelectorComponent } from "../local-vault/popup/local-vault-environment.component";
+import { LOCAL_VAULT_ROUTES } from "../local-vault/popup/local-vault-routes";
 import BrowserPopupUtils from "../platform/browser/browser-popup-utils";
 import { popupRouterCacheGuard } from "../platform/popup/view-cache/popup-router-cache.service";
 import { RouteCacheOptions } from "../platform/services/popup-view-cache-background.service";
@@ -151,6 +152,8 @@ const unauthRouteOverrides = {
 };
 
 const routes: Routes = [
+  // The pages of the local vault, which upstream does not have.
+  ...LOCAL_VAULT_ROUTES,
   {
     path: "",
     pathMatch: "full",

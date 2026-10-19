@@ -1,0 +1,38 @@
+<form [formGroup]="form" [bitSubmit]="submit" autocomplete="off" bit-dialog>
+  <span bitDialogTitle>Update your encryption settings</span>
+  <div bitDialogContent>
+    <bit-form-field disableMargin>
+      <bit-label>Master password</bit-label>
+      <input
+        bitInput
+        type="password"
+        formControlName="masterPassword"
+        id="local-vault-kdf-confirmation_input_master-password"
+        appAutofocus
+      />
+      <button type="button" bitIconButton bitSuffix bitPasswordInputToggle></button>
+      <bit-hint>Confirm your identity</bit-hint>
+    </bit-form-field>
+  </div>
+  <ng-container bitDialogFooter>
+    <button
+      bitButton
+      buttonType="primary"
+      type="submit"
+      bitFormButton
+      id="local-vault-kdf-confirmation_button_submit"
+    >
+      Update settings
+    </button>
+    <button
+      bitButton
+      buttonType="secondary"
+      type="button"
+      bitFormButton
+      bitDialogClose
+      id="local-vault-kdf-confirmation_button_cancel"
+    >
+      Cancel
+    </button>
+  </ng-container>
+</form>
