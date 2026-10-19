@@ -577,31 +577,51 @@ describe("the Bitwarden SDK with the state of the app, on a local vault", () => 
     }
   });
 
-  it("changes how the master key of an account is derived", async () => {
-    const vault = await startWithState(V1, true);
-    const before = JSON.parse(vaultFile(vault)).sync.userDecryption.masterPasswordUnlock;
-    const kdf: Kdf = { pBKDF2: { iterations: 650_000 } };
+  it.each<[string, Kdf, unknown]>([
+    [
+      "PBKDF2-SHA256 with more iterations",
+      { pBKDF2: { iterations: 650_000 } },
+      { kdfType: 0, iterations: 650_000, memory: null, parallelism: null },
+    ],
+    [
+      "Argon2id, which the encryption key settings of the extension offer as well",
+      { argon2id: { iterations: 2, memory: 16, parallelism: 1 } },
+      { kdfType: 1, iterations: 2, memory: 16, parallelism: 1 },
+    ],
+  ])(
+    "changes how the master key of an account is derived, to %s",
+    async (_, kdf, stored) => {
+      const vault = await startWithState(V1, true);
+      const before = JSON.parse(vaultFile(vault)).sync.userDecryption.masterPasswordUnlock;
 
-    await vault.sdk.user_crypto_management().change_kdf(MASTER_PASSWORD, kdf);
+      await vault.sdk.user_crypto_management().change_kdf(MASTER_PASSWORD, kdf);
 
-    const sync = JSON.parse(vaultFile(vault)).sync;
-    const unlock = sync.userDecryption.masterPasswordUnlock;
-    expect(unlock.kdf).toEqual({
-      kdfType: 0,
-      iterations: 650_000,
-      memory: null,
-      parallelism: null,
-    });
-    expect(unlock.salt).toBe(before.salt);
-    // The user key is the same, and encrypted again with the master key that is derived now.
-    expect(unlock.masterKeyEncryptedUserKey).toMatch(/^2\./);
-    expect(unlock.masterKeyEncryptedUserKey).not.toBe(before.masterKeyEncryptedUserKey);
-    expect(sync.profile.key).toBe(unlock.masterKeyEncryptedUserKey);
-    // The master password is known by another hash than before.
-    expect((await logIn(vault.server, vault.passwordHash)).code).toBe(400);
-    const prelogin = await vault.sdk.auth().login().get_password_prelogin(EMAIL);
-    expect(prelogin).toEqual({ kdf, salt: EMAIL });
-  }, 60_000);
+      const sync = JSON.parse(vaultFile(vault)).sync;
+      const unlock = sync.userDecryption.masterPasswordUnlock;
+      expect(unlock.kdf).toEqual(stored);
+      expect(unlock.salt).toBe(before.salt);
+      // The user key is the same, and encrypted again with the master key that is derived now.
+      expect(unlock.masterKeyEncryptedUserKey).toMatch(/^2\./);
+      expect(unlock.masterKeyEncryptedUserKey).not.toBe(before.masterKeyEncryptedUserKey);
+      expect(sync.profile.key).toBe(unlock.masterKeyEncryptedUserKey);
+      // The SDK has the app keep the new settings, which the app unlocks with from now on.
+      expect(vault.state.get("kdf_config")).toEqual(kdf);
+      expect(vault.state.get("masterpassword_unlock_data")).toMatchObject({
+        salt: before.salt,
+        kdf,
+        masterKeyWrappedUserKey: unlock.masterKeyEncryptedUserKey,
+      });
+      // The master password is known by another hash than before: the one that the new settings
+      // derive, which logs the account in.
+      expect((await logIn(vault.server, vault.passwordHash)).code).toBe(400);
+      const update = await vault.sdk.crypto().make_update_kdf(MASTER_PASSWORD, kdf);
+      const passwordHash = update.masterPasswordAuthenticationData.masterPasswordAuthenticationHash;
+      expect((await logIn(vault.server, passwordHash)).code).toBe(200);
+      const prelogin = await vault.sdk.auth().login().get_password_prelogin(EMAIL);
+      expect(prelogin).toEqual({ kdf, salt: EMAIL });
+    },
+    60_000,
+  );
 
   it("takes what the local server syncs for the keys of the account", async () => {
     const vault = await startWithState(V1);

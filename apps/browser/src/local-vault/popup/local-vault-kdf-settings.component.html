@@ -1,0 +1,97 @@
+<popup-page [loading]="loading()">
+  <popup-header slot="header" pageTitle="Encryption key settings" showBackButton>
+    <ng-container slot="end">
+      <app-pop-out></app-pop-out>
+    </ng-container>
+  </popup-header>
+
+  <form [formGroup]="formGroup" autocomplete="off">
+    <bit-section>
+      <p bitTypography="body2">
+        Choose how the key that unlocks your vault is derived from your master password. All options
+        are secure, but stronger ones protect better against guessing the master password,
+        especially from a copy of the vault folder. The default settings suit most users.
+      </p>
+      <bit-card>
+        <bit-form-field>
+          <bit-label>Algorithm</bit-label>
+          <bit-select formControlName="kdf" id="local-vault-kdf-settings_select_algorithm">
+            @for (option of kdfOptions; track option.value) {
+              <bit-option [value]="option.value" [label]="option.name"></bit-option>
+            }
+          </bit-select>
+        </bit-form-field>
+        @if (isArgon2()) {
+          <bit-form-field formGroupName="kdfConfig">
+            <bit-label>KDF iterations</bit-label>
+            <input
+              bitInput
+              type="number"
+              formControlName="iterations"
+              id="local-vault-kdf-settings_input_iterations"
+              [min]="ARGON2_ITERATIONS.min"
+              [max]="ARGON2_ITERATIONS.max"
+            />
+          </bit-form-field>
+          <bit-form-field formGroupName="kdfConfig">
+            <bit-label>KDF memory (MB)</bit-label>
+            <input
+              bitInput
+              type="number"
+              formControlName="memory"
+              id="local-vault-kdf-settings_input_memory"
+              [min]="ARGON2_MEMORY.min"
+              [max]="ARGON2_MEMORY.max"
+            />
+          </bit-form-field>
+          <bit-form-field formGroupName="kdfConfig" disableMargin>
+            <bit-label>KDF parallelism</bit-label>
+            <input
+              bitInput
+              type="number"
+              formControlName="parallelism"
+              id="local-vault-kdf-settings_input_parallelism"
+              [min]="ARGON2_PARALLELISM.min"
+              [max]="ARGON2_PARALLELISM.max"
+            />
+          </bit-form-field>
+        } @else {
+          <bit-form-field formGroupName="kdfConfig" disableMargin>
+            <bit-label>KDF iterations</bit-label>
+            <input
+              bitInput
+              type="number"
+              formControlName="iterations"
+              id="local-vault-kdf-settings_input_iterations"
+              [min]="PBKDF2_ITERATIONS.min"
+              [max]="PBKDF2_ITERATIONS.max"
+            />
+            <bit-hint>We recommend 600,000 or more</bit-hint>
+          </bit-form-field>
+        }
+      </bit-card>
+    </bit-section>
+
+    <bit-callout type="warning" [title]="null">
+      Values above the default improve security, but your vault takes longer to unlock, on this
+      device and on the other devices that share the vault folder. Increase them in small steps, and
+      try each change on all of your devices.
+    </bit-callout>
+    <p bitTypography="body2">
+      No device is logged out. The other devices that share the vault folder use the new settings
+      after their next sync.
+    </p>
+  </form>
+
+  <popup-footer slot="footer">
+    <button
+      bitButton
+      buttonType="primary"
+      type="button"
+      id="local-vault-kdf-settings_button_update"
+      (click)="openConfirmation()"
+    >
+      Update encryption settings
+    </button>
+  </popup-footer>
+</popup-page>

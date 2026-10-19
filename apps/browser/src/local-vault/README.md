@@ -70,6 +70,31 @@ popup, sidebar                          background page
   directory of its own, and the one before stays in the vault folder. That one must not be
   deleted by hand, as part of the vault may be only in it.
 
+## Changing how the master key is derived
+
+Account security has "Encryption key settings": upstream has that page only in the web vault,
+which does not exist here. It is a page of the local vault
+(`popup/local-vault-kdf-settings.component.ts`) that changes how the master key is derived from
+the master password: with PBKDF2-SHA256 or with Argon2id, and with how much work. Once the master
+password is confirmed, the Bitwarden SDK encrypts the user key again with the master key that the
+new settings derive, and sends it to the local server (`POST accounts/kdf`), which keeps it in
+place of the one before, along with what the master password is now recognized by. The user key
+stays the same, so the items do not change. The page is in English only, as its texts are not
+among the messages of upstream.
+
+No device is logged out, as with a Bitwarden server. The other devices that share the vault folder
+take the new settings at their next sync. Until then, a device that has not synced still unlocks
+with the settings before, but when it proves the master password to the local server, such as to
+delete the account, the master password is taken to be wrong. That is why the page syncs before it
+shows the settings: a change made with the settings before would be refused the same way. If the
+local server refuses the change all the same, as another device changed the settings since, the
+dialog that asks for the master password syncs again, says so, and stays open to try again
+(`popup/local-vault-kdf-confirmation.component.ts`), in place of what the SDK says about it: that
+the request failed with a 400, and the answer of the local server, "Invalid master password.". The
+SDK does not tell such a refusal apart from other failures of its request, so the dialog tells it by
+whether the sync brought other settings. If the sync logs the account out, as another device changed
+the master password, it says nothing.
+
 ## What is changed in upstream files
 
 Everything else is new: the files in this directory and in `native-host/`, the submodule
@@ -77,19 +102,20 @@ Everything else is new: the files in this directory and in `native-host/`, the s
 check them, `test-local-vault.yml` and `lint-local-vault.yml` in `.github/workflows/`, and the
 action that builds the local vault for them, `.github/actions/build-local-vault/`.
 
-| File                                                   | Change                                                                                                                                                                                                                                                |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/platform/background.ts`                           | Imports `local-vault/browser/install-background` first.                                                                                                                                                                                               |
-| `src/popup/main.ts`                                    | Imports `local-vault/browser/install-foreground` first.                                                                                                                                                                                               |
-| `src/popup/app-routing.module.ts`                      | The login pages say that the vault is the local one on this device, and offer no server to choose.                                                                                                                                                    |
-| `src/platform/services/browser-environment.service.ts` | Overrides `buildEnvironment`.                                                                                                                                                                                                                         |
-| `src/manifest.json`, `src/manifest.v3.json`            | The name, description, author and homepage are those of this fork. Firefox: `nativeMessaging` is a required permission, the extension has an ID of its own, and it says that it sends browsing activity (for website icons), which needs Firefox 140. |
-| `src/platform/badge/badge-browser-api.ts`              | Firefox: the title of the sidebar is the name of this fork.                                                                                                                                                                                           |
-| `src/autofill/browser/main-context-menu-handler.ts`    | The title of the context menu is the name of this fork.                                                                                                                                                                                               |
-| `src/background/nativeMessaging.background.ts`         | Does not start trying to connect to the desktop app every ten seconds; it connects when a message is sent.                                                                                                                                            |
-| `src/background/native-messaging.background.spec.ts`   | Tests that it does not try to connect when it is created.                                                                                                                                                                                             |
-| `src/platform/ipc/ipc-background.service.ts`           | Does not initialize the transport to the desktop app, which would try to connect to it every ten seconds.                                                                                                                                             |
-| `../../.github/workflows/build-browser.yml`            | Runs the tests of the local vault before every other job, and builds with the local vault that they built, from the submodule that the sources have.                                                                                                  |
+| File                                                      | Change                                                                                                                                                                                                                                                |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/platform/background.ts`                              | Imports `local-vault/browser/install-background` first.                                                                                                                                                                                               |
+| `src/popup/main.ts`                                       | Imports `local-vault/browser/install-foreground` first.                                                                                                                                                                                               |
+| `src/popup/app-routing.module.ts`                         | The login pages say that the vault is the local one on this device, and offer no server to choose. The pages of the local vault come first in its routes (`popup/local-vault-routes.ts`).                                                             |
+| `src/auth/popup/settings/account-security.component.html` | Links to the encryption key settings of the local vault (`popup/local-vault-kdf-settings.component.ts`).                                                                                                                                              |
+| `src/platform/services/browser-environment.service.ts`    | Overrides `buildEnvironment`.                                                                                                                                                                                                                         |
+| `src/manifest.json`, `src/manifest.v3.json`               | The name, description, author and homepage are those of this fork. Firefox: `nativeMessaging` is a required permission, the extension has an ID of its own, and it says that it sends browsing activity (for website icons), which needs Firefox 140. |
+| `src/platform/badge/badge-browser-api.ts`                 | Firefox: the title of the sidebar is the name of this fork.                                                                                                                                                                                           |
+| `src/autofill/browser/main-context-menu-handler.ts`       | The title of the context menu is the name of this fork.                                                                                                                                                                                               |
+| `src/background/nativeMessaging.background.ts`            | Does not start trying to connect to the desktop app every ten seconds; it connects when a message is sent.                                                                                                                                            |
+| `src/background/native-messaging.background.spec.ts`      | Tests that it does not try to connect when it is created.                                                                                                                                                                                             |
+| `src/platform/ipc/ipc-background.service.ts`              | Does not initialize the transport to the desktop app, which would try to connect to it every ten seconds.                                                                                                                                             |
+| `../../.github/workflows/build-browser.yml`               | Runs the tests of the local vault before every other job, and builds with the local vault that they built, from the submodule that the sources have.                                                                                                  |
 
 ## Building
 
@@ -236,6 +262,16 @@ it was deleted and comes back later than that brings it back. In addition:
   master password and a copy of the folder can decrypt the vault, items added since included.
   Export the vault, import it into a new account, and delete the old account, which deletes the
   files of every device, and what a tool that syncs the folder left in its directory.
+- Stronger encryption key settings do not protect a copy of the vault folder that was taken
+  before. The user key encrypted with the master key of the settings before stays in the vault
+  folder in the same places as after a change of the master password, and the master password is
+  as easy to guess from it as it was.
+- If another account in the vault folder has the same email, a client is told the settings of the
+  first of them by ID before it logs in (`docs/DESIGN.md` of the local vault). Once the settings of
+  one of them change, an account whose settings are not those of the first one can no longer be
+  logged in to.
+- What the Android app does with encryption key settings that another device changed was not
+  tried.
 - An attachment is held in memory as a whole. One that is larger than 256 MB is refused: the app
   sends it in blocks, which the local server does not put together.
 - The extension does not try to reach the Bitwarden desktop app every ten seconds, as upstream
