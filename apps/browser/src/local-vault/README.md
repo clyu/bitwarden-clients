@@ -70,6 +70,39 @@ popup, sidebar                          background page
   directory of its own, and the one before stays in the vault folder. That one must not be
   deleted by hand, as part of the vault may be only in it.
 
+## Changing the master password
+
+Account security has "Change master password". Upstream opens the web vault for it, which does
+not exist here: its page in the extension (`ChangePasswordPageComponent`) is behind a feature flag
+(`pm-32413-multi-client-password-management`) that the local server does not report. It opens a
+page of the local vault instead (`popup/local-vault-change-password.component.ts`), which has the
+form of upstream (`InputPasswordComponent`) and changes the master password the way upstream does
+(`ChangePasswordService`): the user key is encrypted with the master key of the new master
+password, which is derived with the same settings, and sent to the local server
+(`POST accounts/password`) along with what the new master password is recognized by and its hint.
+The local server keeps them in place of the ones before, and gives the account a new security
+stamp. The user key stays the same, so the items do not change, and whoever knows the old master
+password is not locked out (see "Limits"). The extension then logs out, as upstream does, to be
+logged in to with the new master password. The page has the texts of upstream, but for what it
+says about the vault folder, which is in English only. That includes what the form says under the
+field of the hint: upstream says that the hint can be sent to the email of the account, which does
+not happen here, as the local server answers a request for the hint with the hint itself, and
+whoever can read the vault folder can read it there. The page gives the form the messages of the app
+with that one replaced (`popup/local-vault-hint-text.ts`), so that the form stays as upstream has
+it.
+
+The other devices that share the vault folder are logged out at their next sync after the change
+has come to them, when they find the new security stamp, and not within an hour, as with a
+Bitwarden server. Until then, a device that has not synced still unlocks with the master password
+before. The page syncs before it shows the form, as the encryption key settings do (below): the
+current master password is proven to the local server with the settings that the extension has,
+and the new master key is derived with them, so if another device changed the settings, the local
+server would refuse the change. If another device changed the master password, that sync logs
+this one out. If the local server refuses the change all the same, as another device changed the
+settings since, the page syncs again and asks the user to try again, in place of the message of the
+local server, "Invalid master password.": the master password was checked to be right before the
+change was sent. If that sync logs the account out, the page says nothing.
+
 ## Changing how the master key is derived
 
 Account security has "Encryption key settings": upstream has that page only in the web vault,
@@ -95,6 +128,13 @@ SDK does not tell such a refusal apart from other failures of its request, so th
 whether the sync brought other settings. If the sync logs the account out, as another device changed
 the master password, it says nothing.
 
+The Android app takes the new settings at its next sync as well, into what it keeps of the account,
+but its SDK keeps the settings that the vault was unlocked with until the vault is locked. The app
+therefore proves the master password, and derives the master key of a new master password, with the
+settings of the account and not with those of its SDK, and syncs before it changes either, as the
+extension does (`docs/DECENTRALIZATION.md` of the app, "Changing how the master key is derived" and
+"Changing the master password").
+
 ## What is changed in upstream files
 
 Everything else is new: the files in this directory and in `native-host/`, the submodule
@@ -107,7 +147,7 @@ action that builds the local vault for them, `.github/actions/build-local-vault/
 | `src/platform/background.ts`                              | Imports `local-vault/browser/install-background` first.                                                                                                                                                                                               |
 | `src/popup/main.ts`                                       | Imports `local-vault/browser/install-foreground` first.                                                                                                                                                                                               |
 | `src/popup/app-routing.module.ts`                         | The login pages say that the vault is the local one on this device, and offer no server to choose. The pages of the local vault come first in its routes (`popup/local-vault-routes.ts`).                                                             |
-| `src/auth/popup/settings/account-security.component.html` | Links to the encryption key settings of the local vault (`popup/local-vault-kdf-settings.component.ts`).                                                                                                                                              |
+| `src/auth/popup/settings/account-security.component.html` | "Change master password" opens the page of the local vault (`popup/local-vault-change-password.component.ts`) in place of the web vault. Links to the encryption key settings of the local vault (`popup/local-vault-kdf-settings.component.ts`).     |
 | `src/platform/services/browser-environment.service.ts`    | Overrides `buildEnvironment`.                                                                                                                                                                                                                         |
 | `src/manifest.json`, `src/manifest.v3.json`               | The name, description, author and homepage are those of this fork. Firefox: `nativeMessaging` is a required permission, the extension has an ID of its own, and it says that it sends browsing activity (for website icons), which needs Firefox 140. |
 | `src/platform/badge/badge-browser-api.ts`                 | Firefox: the title of the sidebar is the name of this fork.                                                                                                                                                                                           |
@@ -206,6 +246,12 @@ email that no other account has, fail until the directory is deleted by hand.
      does not follow.
    - `local-sdk-client` does the same with the SDK itself, which fails when an update of the SDK
      changes what it sends or what it accepts back.
+   - `local-vault-master-password` changes the encryption key settings and then the master
+     password without locking in between, in the extension and in the Android app, on one device
+     and on two that share the vault folder: with the services of the extension, and with what
+     the app asks of its SDK and sends. It fails when an update of the SDK, of the local vault or
+     of those services leaves an account that the new master password does not log in to and
+     unlock on every device.
    - `manifest` fails when a merge took something out of the manifests that the local vault
      helper needs.
    - `local-vault-helper` runs the helper with `python3`, and checks it, with what the extension
@@ -244,8 +290,6 @@ it was deleted and comes back later than that brings it back. In addition:
   browsers, but nothing was tried, and the helper is only installed for Firefox. The manifest of
   version 3 has the same changes, but was not tried either: there the browser stops the
   background when it is idle, which the local server was not made for.
-- Changing the master password opens the web vault, which does not exist here. Change it in the
-  Android app; the extension logs out at its next sync and logs in with the new one.
 - Changing the master password is not enough if someone else may know the old one. The user key
   stays the same, and the vault folder keeps it encrypted with the old master password: in the
   directory of every device until that device next changes the vault, or syncs a day or more
@@ -253,15 +297,16 @@ it was deleted and comes back later than that brings it back. In addition:
   its first sync after its background starts, and at the sync after one where it could not; in
   the backup of that file until the device writes the file again; and for good in the directory
   of an installation that was removed, which nothing writes anymore and which must not be deleted
-  by hand. The extension mostly leaves the old one out of its file soon after the change comes:
-  at the sync that brings it, if it last looked through its file a day or more before, or else
-  at its first sync after you log in with the new master password, as the extension restarts
-  when it logs out, unless another of its accounts is unlocked, or the one that it switches to is
-  locked with a PIN that has "Require master password on browser restart" on. The backup of its
-  file then holds the old one until the extension next writes that file. Whoever has the old
-  master password and a copy of the folder can decrypt the vault, items added since included.
-  Export the vault, import it into a new account, and delete the old account, which deletes the
-  files of every device, and what a tool that syncs the folder left in its directory.
+  by hand. The extension leaves the old one out of its file at once when the master password is
+  changed in it, and mostly soon after a change on another device comes: at the sync that brings
+  it, if it last looked through its file a day or more before, or else at its first sync after you
+  log in with the new master password, as the extension restarts when it logs out, unless another
+  of its accounts is unlocked, or the one that it switches to is locked with a PIN that has
+  "Require master password on browser restart" on. The backup of its file then holds the old one
+  until the extension next writes that file. Whoever has the old master password and a copy of the
+  folder can decrypt the vault, items added since included. Export the vault, import it into a new
+  account, and delete the old account, which deletes the files of every device, and what a tool
+  that syncs the folder left in its directory.
 - Stronger encryption key settings do not protect a copy of the vault folder that was taken
   before. The user key encrypted with the master key of the settings before stays in the vault
   folder in the same places as after a change of the master password, and the master password is
@@ -270,8 +315,6 @@ it was deleted and comes back later than that brings it back. In addition:
   first of them by ID before it logs in (`docs/DESIGN.md` of the local vault). Once the settings of
   one of them change, an account whose settings are not those of the first one can no longer be
   logged in to.
-- What the Android app does with encryption key settings that another device changed was not
-  tried.
 - An attachment is held in memory as a whole. One that is larger than 256 MB is refused: the app
   sends it in blocks, which the local server does not put together.
 - The extension does not try to reach the Bitwarden desktop app every ten seconds, as upstream
