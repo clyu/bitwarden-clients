@@ -12,10 +12,12 @@ import { DeviceRequest } from "@bitwarden/common/auth/models/request/identity-to
 import { PasswordTokenRequest } from "@bitwarden/common/auth/models/request/identity-token/password-token.request";
 import { TokenTwoFactorRequest } from "@bitwarden/common/auth/models/request/identity-token/token-two-factor.request";
 import { PasswordHintRequest } from "@bitwarden/common/auth/models/request/password-hint.request";
+import { PasswordRequest } from "@bitwarden/common/auth/models/request/password.request";
 import { RegisterFinishRequest } from "@bitwarden/common/auth/models/request/registration/register-finish.request";
 import { IdentityTokenResponse } from "@bitwarden/common/auth/models/response/identity-token.response";
 import { PasswordPreloginApiService } from "@bitwarden/common/auth/password-prelogin/password-prelogin-api.service";
 import { PasswordPreloginRequest } from "@bitwarden/common/auth/password-prelogin/password-prelogin.request";
+import { MasterPasswordApiService } from "@bitwarden/common/auth/services/master-password/master-password-api.service.implementation";
 import { ClientType, DeviceType } from "@bitwarden/common/enums";
 import {
   MasterKeyWrappedUserKey,
@@ -70,6 +72,11 @@ const DEVICE_ID = "device";
 const ENCRYPTED =
   "2.aXZpdml2aXZpdml2aXZpdg==|ZGF0YQ==|bWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWE=";
 const USER_KEY = ENCRYPTED as unknown as MasterKeyWrappedUserKey;
+// The master password after a change, and the user key encrypted with the master key of it.
+const NEW_PASSWORD_HASH = "bmV3LXBhc3N3b3JkLWhhc2g=";
+const NEW_ENCRYPTED =
+  "2.aXZpdml2aXZpdml2aXZpdg==|bmV3LWRhdGE=|bWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWE=";
+const NEW_USER_KEY = NEW_ENCRYPTED as unknown as MasterKeyWrappedUserKey;
 
 /**
  * The API services of the app, talking to the local server through `fetch` the way they do in
@@ -163,11 +170,11 @@ describe("the API services of the app on a local vault", () => {
     );
   }
 
-  async function logIn(): Promise<IdentityTokenResponse> {
+  async function logIn(passwordHash = PASSWORD_HASH): Promise<IdentityTokenResponse> {
     const response = await apiService.postIdentityToken(
       new PasswordTokenRequest(
         EMAIL,
-        PASSWORD_HASH,
+        passwordHash,
         new TokenTwoFactorRequest(),
         new DeviceRequest("app-id", platformUtilsService),
       ),
@@ -301,6 +308,43 @@ describe("the API services of the app on a local vault", () => {
     expect(sync.sends).toEqual([]);
     expect(sync.policies).toEqual([]);
     expect(await apiService.getAccountRevisionDate()).toBeLessThanOrEqual(revisionDate);
+  });
+
+  it("changes the master password, which the account logs in with from then on", async () => {
+    await register();
+    await logIn();
+    const stamp = (await apiService.getSync()).profile?.securityStamp;
+    const kdf = new PBKDF2KdfConfig(600_000);
+    const salt = EMAIL as MasterPasswordSalt;
+    const unlockData = new MasterPasswordUnlockData(salt, kdf, NEW_USER_KEY);
+
+    // What the app sends (`DefaultChangePasswordService.changePassword`): the hash of the master
+    // password, and what the new one is known by and unlocks the user key with, with its hint.
+    await new MasterPasswordApiService(apiService, mock<LogService>()).postPassword(
+      new PasswordRequest(
+        PASSWORD_HASH as MasterPasswordAuthenticationHash,
+        {
+          salt,
+          kdf,
+          masterPasswordAuthenticationHash: NEW_PASSWORD_HASH as MasterPasswordAuthenticationHash,
+        },
+        unlockData,
+        "new hint",
+      ),
+    );
+
+    await expect(logIn()).rejects.toMatchObject({ statusCode: 400 });
+    const login = await logIn(NEW_PASSWORD_HASH);
+    expect(login.key?.encryptedString).toBe(NEW_ENCRYPTED);
+    expect(login.userDecryptionOptions?.masterPasswordUnlock?.toMasterPasswordUnlockData()).toEqual(
+      unlockData,
+    );
+    // What logs the account out on the other devices, at their next sync.
+    expect(stamp).toBeTruthy();
+    expect((await apiService.getSync()).profile?.securityStamp).not.toBe(stamp);
+    const hint = apiService.postPasswordHint(new PasswordHintRequest(EMAIL));
+    await expect(hint).rejects.toMatchObject({ message: "Your master password hint: new hint" });
+    expect(logoutCallback).not.toHaveBeenCalled();
   });
 
   it("does not report any feature flags", async () => {

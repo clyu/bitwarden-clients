@@ -179,14 +179,11 @@
           </button>
         </bit-item>
         @if (showChangeMasterPass) {
+          <!-- The page of the local vault that changes the master password, not the web vault. -->
           <bit-item>
-            <button bit-item-content type="button" appStopClick (click)="changePassword()">
+            <button bit-item-content type="button" appStopClick routerLink="/local-vault-password">
               {{ "changeMasterPassword" | i18n }}
-              @if (multiClientPasswordManagement$ | async) {
-                <bit-icon slot="end" name="bwi-angle-right" class="tw-text-lg"></bit-icon>
-              } @else {
-                <bit-icon slot="end" name="bwi-external-link"></bit-icon>
-              }
+              <bit-icon slot="end" name="bwi-angle-right" class="tw-text-lg"></bit-icon>
             </button>
           </bit-item>
           <!-- The page of the local vault that changes how the master key is derived. -->
