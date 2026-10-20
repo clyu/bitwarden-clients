@@ -84,8 +84,8 @@ export class LocalVaultKdfConfirmationComponent {
     if (this.form.invalid) {
       return;
     }
-    // The local server takes any settings, and a master key that cannot be derived with them
-    // would leave the account impossible to unlock.
+    // As in the web vault: the SDK derives a master key with the settings before the local
+    // server can refuse them.
     this.kdfConfig.validateKdfConfigForSetting();
 
     const masterPassword = this.form.controls.masterPassword.value;
