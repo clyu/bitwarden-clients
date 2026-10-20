@@ -2,16 +2,14 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
-  ElementRef,
   OnInit,
-  afterNextRender,
   computed,
   inject,
   signal,
 } from "@angular/core";
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
 import { FormBuilder, FormControl, ReactiveFormsModule, Validators } from "@angular/forms";
-import { firstValueFrom, fromEvent, merge, takeUntil } from "rxjs";
+import { firstValueFrom } from "rxjs";
 
 import { AccountService } from "@bitwarden/common/auth/abstractions/account.service";
 import { getUserId } from "@bitwarden/common/auth/services/account.service";
@@ -22,7 +20,6 @@ import {
   CardComponent,
   DialogService,
   FormFieldModule,
-  ScrollLayoutService,
   SectionComponent,
   SelectModule,
   TypographyModule,
@@ -36,6 +33,7 @@ import { PopupFooterComponent } from "../../platform/popup/layout/popup-footer.c
 import { PopupHeaderComponent } from "../../platform/popup/layout/popup-header.component";
 import { PopupPageComponent } from "../../platform/popup/layout/popup-page.component";
 
+import { keepAtTop } from "./keep-at-top";
 import { LocalVaultKdfConfirmationComponent } from "./local-vault-kdf-confirmation.component";
 
 type KdfOption = { name: string; value: KdfType };
@@ -91,8 +89,6 @@ export class LocalVaultKdfSettingsComponent implements OnInit {
   private readonly dialogService = inject(DialogService);
   private readonly formBuilder = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-  private readonly scrollLayout = inject(ScrollLayoutService);
 
   protected readonly kdfOptions = KDF_OPTIONS;
   protected readonly loading = signal(true);
@@ -114,7 +110,7 @@ export class LocalVaultKdfSettingsComponent implements OnInit {
   protected readonly ARGON2_PARALLELISM = Argon2KdfConfig.PARALLELISM;
 
   constructor() {
-    afterNextRender(() => this.keepAtTop());
+    keepAtTop();
   }
 
   async ngOnInit() {
@@ -151,31 +147,6 @@ export class LocalVaultKdfSettingsComponent implements OnInit {
       : new PBKDF2KdfConfig(controls.iterations.value!);
     this.kdfConfig.set(kdfConfig);
     LocalVaultKdfConfirmationComponent.open(this.dialogService, { kdfConfig });
-  }
-
-  /**
-   * Keeps the page at its top until the user scrolls it. As the page opens, Firefox can scroll it
-   * by itself to where the page before it was scrolled to: account security, which the user
-   * scrolls down to reach the link to this page. No script asks for that, so whatever scrolls the
-   * page before the user does is undone.
-   */
-  private keepAtTop() {
-    const region = this.scrollLayout.scrollableRef()?.nativeElement;
-    if (region == null || !this.host.nativeElement.contains(region)) {
-      return;
-    }
-    const passive = { passive: true };
-    const userScrolls = merge(
-      fromEvent(region, "wheel", passive),
-      // The scrollbar as well.
-      fromEvent(region, "pointerdown", passive),
-      fromEvent(region, "touchstart", passive),
-      fromEvent(region.ownerDocument, "keydown"),
-    );
-    region.scrollTop = 0;
-    fromEvent(region, "scroll")
-      .pipe(takeUntilDestroyed(this.destroyRef), takeUntil(userScrolls))
-      .subscribe(() => (region.scrollTop = 0));
   }
 
   private updateKdfConfig(kdfType: KdfType) {
