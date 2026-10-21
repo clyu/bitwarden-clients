@@ -184,34 +184,21 @@ that they built.
 3. Commit the submodule, which records the commit that it is at.
 
 The Android app has `local-vault-rs` as well. A change to the format of the vault folder has to
-reach both before either of them writes it. Version 2, in which every device writes a directory
-of its own, is such a change. The first write of an updated client takes a vault of version 1
-over, and once that has come to a client that knows only version 1, that client does not write
-the account, but does not have it either:
+reach both before either of them writes it. A client of version 2 that gets a file of a later
+version fails the requests of the account, and those that look for an account by an email that
+no other account has, as ones that did not reach the server, until it is updated: it does not log
+the account out, take the master password to be wrong, or let the email be registered again. The
+account cannot be used on a client that does not have the next change of the format yet, but
+nothing else goes wrong there. So the Android app is released with such a change before the
+extension, or at the same time, and not after it: a browser can update the extension before the
+user has updated the app.
 
-- Its requests for the account are refused as unauthorized, which logs the account out.
-- The email of the account is taken to belong to no account, so the master key is derived with
-  the default KDF settings, and the master password is taken to be wrong.
-- The email can be registered again. An updated client then has two accounts with that email,
-  and logs in to the first of them, by their IDs, that the master password is right for, which
-  can be the new, empty one.
-
-Until it has come, that client still changes the vault of version 1, and a tool that syncs the
-folder can keep the vault that it writes in place of the `vault.json` of version 2. The updated
-clients then take that vault over again. An item that it changed is kept as it changed it if that
-change is the later one, and one that it deleted stays deleted unless an updated client changed
-it after taking the vault over. What an updated client changed of the account, the master
-password included, is kept over that vault, which does not say when it changed either of them:
-a change of the master password on the client of version 1 is lost.
-
-So the Android app is released with such a change before the extension, or at the same time,
-and not after it: a browser can update the extension before the user has updated the app.
-
-A client of version 2 deals with a file of a later version better. It fails the requests of the
-account, and those that look for an account by an email that no other account has, as ones that
-did not reach the server, until it is updated: it does not log the account out, take the master
-password to be wrong, or let the email be registered again. The account cannot be used on a
-client that does not have the next change of the format yet, but nothing else goes wrong there.
+Version 2, in which every device writes a directory of its own, was such a change. The first write
+of an updated client took a vault of version 1, which the `vault.json` of an account held whole,
+over into the file of its device. The local vault no longer reads version 1 since the commit
+"drop v1 support" of `local-vault-rs`: an account whose `vault.json` still holds such a vault
+fails the same way as one of a later version, until a build from before then takes it over
+(`LOCAL_VAULT_FORMAT.md`, "The earlier layout").
 
 The `vault.json` that says that an account was deleted (`LOCAL_VAULT_FORMAT.md`, "Deleting an
 account") is a change of the same kind, the other way round. A client from before it takes such
@@ -285,7 +272,10 @@ it was deleted and comes back later than that brings it back. In addition:
   the files `devices/<device id>/vault.json` in it has `account` in its `records`, or none has
   `masterPassword` there. Once every device that shares the folder has synced, delete that
   directory by hand, as the local vault cannot use it without the file that never came. If the
-  warning says instead that a newer client wrote the vault, update the extension.
+  warning says instead that a newer client wrote the vault, update the extension. If it says that
+  the vault has the layout of version 1, no device took that vault over before the local vault
+  stopped reading that layout: a build of the extension or of the Android app from before then
+  takes it over the first time that it changes the vault (see "Updating the local vault").
 - Firefox with manifest version 2 is what this is made for. Nothing is known to break in other
   browsers, but nothing was tried, and the helper is only installed for Firefox. The manifest of
   version 3 has the same changes, but was not tried either: there the browser stops the
