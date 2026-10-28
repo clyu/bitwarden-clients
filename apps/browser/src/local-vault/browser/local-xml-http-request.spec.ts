@@ -98,7 +98,10 @@ describe("XMLHttpRequest on a local vault", () => {
     globalThis.XMLHttpRequest = FakeXMLHttpRequest as unknown as typeof XMLHttpRequest;
     globalThis.ProgressEvent ??= FakeProgressEvent as unknown as typeof ProgressEvent;
     fileSystem = new InMemoryLocalVaultFileSystem();
-    server = new LocalServer(fileSystem, "device");
+    server = new LocalServer(fileSystem, "device", {
+      name: "firefox",
+      type: DeviceType.FirefoxExtension,
+    });
     installLocalXmlHttpRequest((request) => server.handle(request));
 
     const platformUtilsService = mock<PlatformUtilsService>();
