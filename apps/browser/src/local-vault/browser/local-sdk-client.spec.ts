@@ -5,6 +5,7 @@
 import { mock } from "jest-mock-extended";
 import { of } from "rxjs";
 
+import { DeviceType } from "@bitwarden/common/enums";
 import { LogService } from "@bitwarden/common/platform/abstractions/log.service";
 import { SdkService } from "@bitwarden/common/platform/abstractions/sdk/sdk.service";
 import { Rc } from "@bitwarden/common/platform/misc/reference-counting/rc";
@@ -145,6 +146,7 @@ async function start(
   const server = new LocalServer(
     fileSystem,
     DEVICE_ID,
+    { name: "chrome", type: DeviceType.ChromeExtension },
     () => new Date(),
     (_, message) => logged.push(message),
   );

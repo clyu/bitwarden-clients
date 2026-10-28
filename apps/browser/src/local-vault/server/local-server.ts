@@ -25,6 +25,17 @@ const IO_ERROR_NAME = "LocalVaultIoError";
 const localVault = import("../../../local-vault-rs/pkg");
 
 /**
+ * What the extension names its device to a Bitwarden server as it logs in (`DeviceRequest`): the
+ * browser that it is in, such as `chrome`, and the number of the type of the extension in it
+ * (`DeviceType`). The files of the device say them, so that the devices that share the vault
+ * folder can be told apart.
+ */
+export interface LocalServerDevice {
+  name: string;
+  type: number;
+}
+
+/**
  * The local vault, on the vault folder of a {@link LocalServer}.
  */
 interface LoadedLocalVault {
@@ -42,8 +53,9 @@ interface LoadedLocalVault {
  *
  * The work is done by the local vault in Rust (the submodule `local-vault-rs`), which the other
  * clients that share a vault folder use as well, down to what a request asks for. This only
- * hands it the requests, the vault folder, the clock and the ID of this installation of the
- * extension, which names the directory of the vault folder that it writes its changes to.
+ * hands it the requests, the vault folder, the clock, the ID of this installation of the
+ * extension, which names the directory of the vault folder that it writes its changes to, and
+ * what its device is.
  */
 export class LocalServer {
   private readonly platform: LocalVaultPlatform;
@@ -59,10 +71,12 @@ export class LocalServer {
    * vault is loaded once it is read. If that fails, a request that was waiting for it reads it
    * again, as does every request after it until it is read, which is better than writing the
    * changes of the extension under an ID that is not kept.
+   * @param device What the extension names its device to a Bitwarden server.
    */
   constructor(
     private readonly fileSystem: LocalVaultFileSystem,
     private readonly deviceId: string | (() => Promise<string>),
+    private readonly device: LocalServerDevice,
     now: () => Date = () => new Date(),
     private readonly log: (level: LocalServerLogLevel, message: string) => void = () => {},
   ) {
@@ -145,7 +159,14 @@ export class LocalServer {
     const deviceId = typeof this.deviceId === "string" ? this.deviceId : this.deviceId();
     const ready = Promise.all([localVault, deviceId]);
     const loading = ready.then(([wasm, id]): LoadedLocalVault => ({
-      server: new wasm.LocalServer(this.fileSystem, this.platform, "browser", id),
+      server: new wasm.LocalServer(
+        this.fileSystem,
+        this.platform,
+        "browser",
+        id,
+        this.device.name,
+        this.device.type,
+      ),
       internalError: {
         code: 500,
         contentType: "application/json; charset=utf-8",

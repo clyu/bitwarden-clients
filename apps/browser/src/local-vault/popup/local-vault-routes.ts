@@ -6,6 +6,7 @@ import { AuthExtensionRoute } from "../../auth/popup/constants/auth-extension-ro
 import type { RouteDataProperties } from "../../popup/app-routing.module";
 
 import { LocalVaultChangePasswordComponent } from "./local-vault-change-password.component";
+import { LocalVaultDevicesComponent } from "./local-vault-devices.component";
 import { LocalVaultKdfSettingsComponent } from "./local-vault-kdf-settings.component";
 
 /**
@@ -25,6 +26,12 @@ export const LOCAL_VAULT_PASSWORD_PATH = "local-vault-password";
 export const LOCAL_VAULT_KDF_SETTINGS_PATH = "local-vault-kdf";
 
 /**
+ * Where the page with the devices that share the vault folder is, which "Manage devices" of account
+ * security links to in place of the page of upstream (`account-security.component.html`).
+ */
+export const LOCAL_VAULT_DEVICES_PATH = "local-vault-devices";
+
+/**
  * The pages of the local vault, which upstream does not have. They come first in the routes of the
  * popup (`app-routing.module.ts`).
  */
@@ -39,6 +46,12 @@ export const LOCAL_VAULT_ROUTES: Routes = [
     path: LOCAL_VAULT_KDF_SETTINGS_PATH,
     component: LocalVaultKdfSettingsComponent,
     canActivate: [authGuard, hasPasswordGuard([`/${AuthExtensionRoute.AccountSecurity}`])],
+    data: { elevation: 2 } satisfies RouteDataProperties,
+  },
+  {
+    path: LOCAL_VAULT_DEVICES_PATH,
+    component: LocalVaultDevicesComponent,
+    canActivate: [authGuard],
     data: { elevation: 2 } satisfies RouteDataProperties,
   },
 ];

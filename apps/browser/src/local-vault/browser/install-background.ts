@@ -5,6 +5,7 @@ import BrowserLocalStorageService from "../../platform/services/browser-local-st
 import { LocalServer } from "../server/local-server";
 
 import { deserializeRequest, installLocalFetch, serializeResponse } from "./local-fetch";
+import { localVaultDevice } from "./local-vault-device";
 import { localVaultDeviceId } from "./local-vault-device-id";
 import { LOCAL_VAULT_NATIVE_HOST } from "./local-vault-environment";
 import {
@@ -32,6 +33,7 @@ const localServer = new LocalServer(
   fileSystem,
   // Read again for the next request if it cannot be read.
   () => localVaultDeviceId(extensionStorage),
+  localVaultDevice(self),
   () => new Date(),
   // The levels of the local server are methods of the log service.
   (level, message) => logService[level](message),

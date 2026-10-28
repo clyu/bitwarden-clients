@@ -68,7 +68,8 @@ popup, sidebar                          background page
   well: an ID that is not kept would leave a new directory in the vault folder every time.
   Removing the extension takes the ID with it, so once it is installed again it writes a
   directory of its own, and the one before stays in the vault folder. That one must not be
-  deleted by hand, as part of the vault may be only in it.
+  deleted by hand, as part of the vault may be only in it: retire it instead (see "Retiring a
+  device").
 
 ## Changing the master password
 
@@ -135,6 +136,38 @@ settings of the account and not with those of its SDK, and syncs before it chang
 extension does (`docs/DECENTRALIZATION.md` of the app, "Changing how the master key is derived" and
 "Changing the master password").
 
+## Retiring a device
+
+Account security has "Manage devices", which upstream lists the devices that a Bitwarden server
+knows in. Here it opens a page of the local vault (`popup/local-vault-devices.component.ts`) with
+the devices that share the vault folder: the installations of the extension and of the Android app
+that have a file in the vault of the account, by their types and their names, and the ID that names
+their directory, with when each last changed the vault, and this one first. The type and the name
+are those that a client names its device by to a Bitwarden server as it logs in: for the extension,
+the type of the extension in the browser that it is in, as upstream shows it, such as
+"Extension - Chrome", and the browser, such as `chrome` (`browser/local-vault-device.ts`); for the
+app, "Mobile - Android" and the model of the phone. They tell a device that is still used, but only
+to fill in passwords, from one that is gone for good, as neither has changed the vault for a long
+time. The files of a device say them once it changed the vault, or synced, with this version of the
+extension or of the app: until then, it is listed as an unknown device. A device that will not be
+used again, such as an installation of the extension that was removed, is retired there: this device
+takes its file over into its own, the vault is put together without it from then on, and the first
+device that syncs 90 days later deletes its directory (`POST local-vault/devices/{id}/retire`, which
+the local vault answers, and `docs/LOCAL_VAULT_FORMAT.md` of `local-vault-rs`, "Retiring a device").
+The vault stays the same. Until then, the device is listed as retired, with the date that its
+directory is deleted after. The page is in English only, apart from its title and the types of the
+devices, as its other texts are not among the messages of upstream.
+
+A device that turns out to be still in use is no longer retired once it changes the vault, or
+syncs a day or more after it last looked through its file for what other devices replaced, which it
+also does at its first sync after its background starts, and keeps what it changed. The page says
+"within a day" for that. This device cannot be retired here, nor a device whose newer file has not
+fully come to this one yet. Nor can a device that stopped for good while it wrote its file, or whose
+file a tool that syncs the folder damaged: the page keeps saying to try again later, and its
+directory stays, with what it holds, as that of a device that is gone for good did before devices
+could be retired. Once a device of an account was retired, a device that has a version of the
+extension or of the Android app from before cannot use the account until it is updated.
+
 ## What is changed in upstream files
 
 Everything else is new: the files in this directory and in `native-host/`, the submodule
@@ -142,20 +175,20 @@ Everything else is new: the files in this directory and in `native-host/`, the s
 check them, `test-local-vault.yml` and `lint-local-vault.yml` in `.github/workflows/`, and the
 action that builds the local vault for them, `.github/actions/build-local-vault/`.
 
-| File                                                      | Change                                                                                                                                                                                                                                                |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/platform/background.ts`                              | Imports `local-vault/browser/install-background` first.                                                                                                                                                                                               |
-| `src/popup/main.ts`                                       | Imports `local-vault/browser/install-foreground` first.                                                                                                                                                                                               |
-| `src/popup/app-routing.module.ts`                         | The login pages say that the vault is the local one on this device, and offer no server to choose. The pages of the local vault come first in its routes (`popup/local-vault-routes.ts`).                                                             |
-| `src/auth/popup/settings/account-security.component.html` | "Change master password" opens the page of the local vault (`popup/local-vault-change-password.component.ts`) in place of the web vault. Links to the encryption key settings of the local vault (`popup/local-vault-kdf-settings.component.ts`).     |
-| `src/platform/services/browser-environment.service.ts`    | Overrides `buildEnvironment`.                                                                                                                                                                                                                         |
-| `src/manifest.json`, `src/manifest.v3.json`               | The name, description, author and homepage are those of this fork. Firefox: `nativeMessaging` is a required permission, the extension has an ID of its own, and it says that it sends browsing activity (for website icons), which needs Firefox 140. |
-| `src/platform/badge/badge-browser-api.ts`                 | Firefox: the title of the sidebar is the name of this fork.                                                                                                                                                                                           |
-| `src/autofill/browser/main-context-menu-handler.ts`       | The title of the context menu is the name of this fork.                                                                                                                                                                                               |
-| `src/background/nativeMessaging.background.ts`            | Does not start trying to connect to the desktop app every ten seconds; it connects when a message is sent.                                                                                                                                            |
-| `src/background/native-messaging.background.spec.ts`      | Tests that it does not try to connect when it is created.                                                                                                                                                                                             |
-| `src/platform/ipc/ipc-background.service.ts`              | Does not initialize the transport to the desktop app, which would try to connect to it every ten seconds.                                                                                                                                             |
-| `../../.github/workflows/build-browser.yml`               | Runs the tests of the local vault before every other job, and builds with the local vault that they built, from the submodule that the sources have.                                                                                                  |
+| File                                                      | Change                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/platform/background.ts`                              | Imports `local-vault/browser/install-background` first.                                                                                                                                                                                                                                                                                                      |
+| `src/popup/main.ts`                                       | Imports `local-vault/browser/install-foreground` first.                                                                                                                                                                                                                                                                                                      |
+| `src/popup/app-routing.module.ts`                         | The login pages say that the vault is the local one on this device, and offer no server to choose. The pages of the local vault come first in its routes (`popup/local-vault-routes.ts`).                                                                                                                                                                    |
+| `src/auth/popup/settings/account-security.component.html` | "Change master password" opens the page of the local vault (`popup/local-vault-change-password.component.ts`) in place of the web vault. Links to the encryption key settings of the local vault (`popup/local-vault-kdf-settings.component.ts`). "Manage devices" opens the devices that share the vault folder (`popup/local-vault-devices.component.ts`). |
+| `src/platform/services/browser-environment.service.ts`    | Overrides `buildEnvironment`.                                                                                                                                                                                                                                                                                                                                |
+| `src/manifest.json`, `src/manifest.v3.json`               | The name, description, author and homepage are those of this fork. Firefox: `nativeMessaging` is a required permission, the extension has an ID of its own, and it says that it sends browsing activity (for website icons), which needs Firefox 140.                                                                                                        |
+| `src/platform/badge/badge-browser-api.ts`                 | Firefox: the title of the sidebar is the name of this fork.                                                                                                                                                                                                                                                                                                  |
+| `src/autofill/browser/main-context-menu-handler.ts`       | The title of the context menu is the name of this fork.                                                                                                                                                                                                                                                                                                      |
+| `src/background/nativeMessaging.background.ts`            | Does not start trying to connect to the desktop app every ten seconds; it connects when a message is sent.                                                                                                                                                                                                                                                   |
+| `src/background/native-messaging.background.spec.ts`      | Tests that it does not try to connect when it is created.                                                                                                                                                                                                                                                                                                    |
+| `src/platform/ipc/ipc-background.service.ts`              | Does not initialize the transport to the desktop app, which would try to connect to it every ten seconds.                                                                                                                                                                                                                                                    |
+| `../../.github/workflows/build-browser.yml`               | Runs the tests of the local vault before every other job, and builds with the local vault that they built, from the submodule that the sources have.                                                                                                                                                                                                         |
 
 ## Building
 
@@ -285,18 +318,18 @@ it was deleted and comes back later than that brings it back. In addition:
   directory of every device until that device next changes the vault, or syncs a day or more
   after it last looked through its file for what other devices replaced, which it also does at
   its first sync after its background starts, and at the sync after one where it could not; in
-  the backup of that file until the device writes the file again; and for good in the directory
-  of an installation that was removed, which nothing writes anymore and which must not be deleted
-  by hand. The extension leaves the old one out of its file at once when the master password is
-  changed in it, and mostly soon after a change on another device comes: at the sync that brings
-  it, if it last looked through its file a day or more before, or else at its first sync after you
-  log in with the new master password, as the extension restarts when it logs out, unless another
-  of its accounts is unlocked, or the one that it switches to is locked with a PIN that has
-  "Require master password on browser restart" on. The backup of its file then holds the old one
-  until the extension next writes that file. Whoever has the old master password and a copy of the
-  folder can decrypt the vault, items added since included. Export the vault, import it into a new
-  account, and delete the old account, which deletes the files of every device, and what a tool
-  that syncs the folder left in its directory.
+  the backup of that file until the device writes the file again; and in the directory of an
+  installation that was removed, which nothing writes anymore and which must not be deleted by
+  hand, until 90 days after it is retired (see "Retiring a device"). The extension leaves the old
+  one out of its file at once when the master password is changed in it, and mostly soon after a
+  change on another device comes: at the sync that brings it, if it last looked through its file a
+  day or more before, or else at its first sync after you log in with the new master password, as
+  the extension restarts when it logs out, unless another of its accounts is unlocked, or the one
+  that it switches to is locked with a PIN that has "Require master password on browser restart" on.
+  The backup of its file then holds the old one until the extension next writes that file. Whoever
+  has the old master password and a copy of the folder can decrypt the vault, items added since
+  included. Export the vault, import it into a new account, and delete the old account, which
+  deletes the files of every device, and what a tool that syncs the folder left in its directory.
 - Stronger encryption key settings do not protect a copy of the vault folder that was taken
   before. The user key encrypted with the master key of the settings before stays in the vault
   folder in the same places as after a change of the master password, and the master password is

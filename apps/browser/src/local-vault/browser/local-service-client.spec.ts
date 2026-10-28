@@ -62,6 +62,7 @@ import { EncArrayBuffer, EncString, PBKDF2KdfConfig } from "@bitwarden/legacy-cr
 import { InMemoryLocalVaultFileSystem } from "../server/in-memory-local-vault-file-system";
 import { LocalServer } from "../server/local-server";
 import { LocalVaultIoError } from "../server/local-vault-file-system";
+import { localVaultRequest } from "../server/local-vault-request";
 
 import { installLocalFetch } from "./local-fetch";
 import { LOCAL_VAULT_URLS } from "./local-vault-environment";
@@ -69,6 +70,8 @@ import { LOCAL_VAULT_URLS } from "./local-vault-environment";
 const EMAIL = "user@example.com";
 const PASSWORD_HASH = "cGFzc3dvcmQtaGFzaA==";
 const DEVICE_ID = "device";
+// What the app names the device to a server, below.
+const DEVICE = { name: "firefox", type: DeviceType.FirefoxExtension };
 const ENCRYPTED =
   "2.aXZpdml2aXZpdml2aXZpdg==|ZGF0YQ==|bWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWFjbWE=";
 const USER_KEY = ENCRYPTED as unknown as MasterKeyWrappedUserKey;
@@ -101,7 +104,7 @@ describe("the API services of the app on a local vault", () => {
 
   beforeEach(() => {
     fileSystem = new InMemoryLocalVaultFileSystem();
-    const server = new LocalServer(fileSystem, DEVICE_ID);
+    const server = new LocalServer(fileSystem, DEVICE_ID, DEVICE);
     globalThis.fetch = nativeFetch;
     installLocalFetch((request) => server.handle(request));
 
@@ -539,6 +542,49 @@ describe("the API services of the app on a local vault", () => {
       message: "This feature needs a Bitwarden server and is not available with a local vault.",
     });
     expect(logoutCallback).not.toHaveBeenCalled();
+  });
+
+  it("lists the devices that share the vault folder, and retires one that is gone", async () => {
+    await register();
+    await logIn();
+    // Another installation of the extension added a folder, and is gone for good since.
+    const chrome = { name: "chrome", type: DeviceType.ChromeExtension };
+    const gone = new LocalServer(fileSystem, "gone-device", chrome);
+    const folder = localVaultRequest("POST", "api/folders", {
+      token: accessToken,
+      json: { name: ENCRYPTED },
+    });
+    expect((await gone.handle(folder)).code).toBe(200);
+
+    // What the page of the devices asks for (`popup/local-vault-devices-api.ts`).
+    const listDevices = () => apiService.send("GET", "/local-vault/devices", null, true, true);
+    const retire = (id: string) =>
+      apiService.send("POST", `/local-vault/devices/${id}/retire`, null, true, true);
+    const devices = await listDevices();
+    const retired = await retire("gone-device");
+
+    const listed = devices.data.map((device: any) => [
+      device.id,
+      device.name,
+      device.type,
+      device.isCurrentDevice,
+      device.retiredDate,
+    ]);
+    expect(listed).toEqual([
+      [DEVICE_ID, "firefox", DeviceType.FirefoxExtension, true, null],
+      ["gone-device", "chrome", DeviceType.ChromeExtension, false, null],
+    ]);
+    expect(retired.id).toBe("gone-device");
+    expect(retired.name).toBe("chrome");
+    const retiredAt = new Date(retired.retiredDate).getTime();
+    expect(new Date(retired.removalDate).getTime() - retiredAt).toBe(90 * 24 * 60 * 60 * 1000);
+    expect((await listDevices()).data[1].retiredDate).toBe(retired.retiredDate);
+    // This device took over the folder that the other one added.
+    expect((await apiService.getSync()).folders).toHaveLength(1);
+    await expect(retire(DEVICE_ID)).rejects.toMatchObject({
+      statusCode: 400,
+      message: "This device cannot be retired.",
+    });
   });
 
   it("fails like a request that does not reach its server when the vault folder is gone", async () => {
