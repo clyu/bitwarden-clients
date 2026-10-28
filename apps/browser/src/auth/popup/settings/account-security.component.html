@@ -135,8 +135,10 @@
         <bit-section-header>
           <h2 bitTypography="h6">{{ "manageDevices" | i18n }}</h2>
         </bit-section-header>
+        <!-- The devices that share the vault folder, which the local vault lists, not the page of
+             upstream, which lists those that a Bitwarden server knows. -->
         <bit-item>
-          <button bit-item-content type="button" appStopClick routerLink="/device-management">
+          <button bit-item-content type="button" appStopClick routerLink="/local-vault-devices">
             {{ "devices" | i18n }}
             <bit-icon slot="end" name="bwi-angle-right" class="tw-text-lg"></bit-icon>
           </button>

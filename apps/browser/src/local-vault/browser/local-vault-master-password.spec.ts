@@ -13,6 +13,7 @@ import { MasterPasswordApiService } from "@bitwarden/common/auth/abstractions/ma
 import { IdentityTokenResponse } from "@bitwarden/common/auth/models/response/identity-token.response";
 import { OrganizationInviteService } from "@bitwarden/common/auth/organization-invite";
 import { PasswordPreloginResponse } from "@bitwarden/common/auth/password-prelogin/password-prelogin.response";
+import { DeviceType } from "@bitwarden/common/enums";
 import { DefaultMasterPasswordUnlockService } from "@bitwarden/common/key-management/master-password/services/default-master-password-unlock.service";
 import { MasterPasswordService } from "@bitwarden/common/key-management/master-password/services/master-password.service";
 import { MasterPasswordSalt } from "@bitwarden/common/key-management/master-password/types/master-password.types";
@@ -107,6 +108,7 @@ function newDevice(id: string): Device {
   const server = new LocalServer(
     fileSystem,
     id,
+    { name: "chrome", type: DeviceType.ChromeExtension },
     () => new Date(),
     (_, message) => logged.push(message),
   );

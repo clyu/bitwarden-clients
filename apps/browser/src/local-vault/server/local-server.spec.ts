@@ -1,6 +1,8 @@
 /**
  * @jest-environment node
  */
+import { DeviceType } from "@bitwarden/common/enums";
+
 import { localVaultHost } from "../../../local-vault-rs/pkg";
 import { LOCAL_VAULT_HOST } from "../browser/local-vault-environment";
 
@@ -46,6 +48,7 @@ describe("the local server of the extension", () => {
     return new LocalServer(
       fileSystem,
       deviceId,
+      { name: "chrome", type: DeviceType.ChromeExtension },
       () => new Date(),
       (level, message) => logged.push([level, message]),
     );

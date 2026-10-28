@@ -1,0 +1,70 @@
+<popup-page [loading]="loading()">
+  <popup-header slot="header" [pageTitle]="'devices' | i18n" showBackButton>
+    <ng-container slot="end">
+      <app-pop-out></app-pop-out>
+    </ng-container>
+  </popup-header>
+
+  <bit-section>
+    <p bitTypography="body2">
+      Each device that shares the vault folder keeps its changes in a folder of its own there, named
+      after the ID of the device. Retire a device that will not be used again, such as this
+      extension before it was installed again: this device takes over what it kept, and its folder
+      is deleted after 90 days. A device that is still used, but only to fill in passwords, may not
+      have changed the vault for a long time either: tell the devices apart by their types and
+      names.
+    </p>
+    <bit-item-group>
+      @for (device of devices(); track device.id) {
+        <bit-item>
+          <bit-item-content [truncate]="false">
+            {{ typeName(device) ?? "Unknown device" }}
+            <ng-container slot="secondary">
+              @if (device.name != null) {
+                <span class="tw-block">{{ device.name }}</span>
+              }
+              @if (device.isCurrentDevice) {
+                <span class="tw-block">This device</span>
+              }
+              <span class="tw-block">{{ device.id }}</span>
+              <span class="tw-block">
+                @if (device.revisionDate != null) {
+                  Last changed the vault on {{ device.revisionDate | date: "mediumDate" }}
+                } @else {
+                  Has not changed the vault
+                }
+              </span>
+              @if (device.retiredDate != null) {
+                <span class="tw-block">
+                  @if (device.isCurrentDevice) {
+                    Retired on {{ device.retiredDate | date: "mediumDate" }} from another device.
+                    This device is no longer retired once it syncs, within a day.
+                  } @else {
+                    Retired on {{ device.retiredDate | date: "mediumDate" }}. Its folder is deleted
+                    after {{ device.removalDate | date: "mediumDate" }}, unless it is used again.
+                  }
+                </span>
+              }
+            </ng-container>
+          </bit-item-content>
+          @if (canRetire(device)) {
+            <ng-container slot="end">
+              <bit-item-action>
+                <button
+                  bitButton
+                  buttonType="secondary"
+                  size="small"
+                  type="button"
+                  [id]="'local-vault-devices_button_retire_' + device.id"
+                  (click)="retire(device)"
+                >
+                  Retire
+                </button>
+              </bit-item-action>
+            </ng-container>
+          }
+        </bit-item>
+      }
+    </bit-item-group>
+  </bit-section>
+</popup-page>

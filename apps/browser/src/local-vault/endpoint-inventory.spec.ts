@@ -94,6 +94,10 @@ describe("the requests that the extension can make", () => {
     ["GET", "ciphers/has-unassigned-ciphers"],
     ["GET", "auth-requests"],
     ["PUT", `devices/identifier/${SOME_ID}/token`],
+    // Made by the pages of the local vault, which are not looked through for requests: the
+    // devices that share the vault folder (`popup/local-vault-devices-api.ts`).
+    ["GET", "local-vault/devices"],
+    ["POST", `local-vault/devices/${SOME_ID}/retire`],
   ])("answers %s %s, as one of the routes that the code does not show", (method, path) => {
     expect(disposition(`${method} /${path}`)).toBe(ANSWERED);
   });
