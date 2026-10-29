@@ -4,16 +4,23 @@
  */
 import { pbkdf2Sync } from "node:crypto";
 
+// The rotation of the user key is made by a page of the local vault, which is run here with what
+// it injects, as in the popup.
+// eslint-disable-next-line no-restricted-imports
+import { Injector, runInInjectionContext } from "@angular/core";
 import { mock } from "jest-mock-extended";
-import { firstValueFrom } from "rxjs";
+import { defer, firstValueFrom, map, of } from "rxjs";
 
 import { DefaultChangePasswordService } from "@bitwarden/angular/auth/password-management/change-password/default-change-password.service";
+import { ApiService } from "@bitwarden/common/abstractions/api.service";
 import { PolicyService } from "@bitwarden/common/admin-console/abstractions/policy/policy.service.abstraction";
 import { MasterPasswordApiService } from "@bitwarden/common/auth/abstractions/master-password-api.service.abstraction";
 import { IdentityTokenResponse } from "@bitwarden/common/auth/models/response/identity-token.response";
 import { OrganizationInviteService } from "@bitwarden/common/auth/organization-invite";
 import { PasswordPreloginResponse } from "@bitwarden/common/auth/password-prelogin/password-prelogin.response";
 import { DeviceType } from "@bitwarden/common/enums";
+import { MasterPasswordUnlockService } from "@bitwarden/common/key-management/master-password/abstractions/master-password-unlock.service";
+import { InternalMasterPasswordServiceAbstraction } from "@bitwarden/common/key-management/master-password/abstractions/master-password.service.abstraction";
 import { DefaultMasterPasswordUnlockService } from "@bitwarden/common/key-management/master-password/services/default-master-password-unlock.service";
 import { MasterPasswordService } from "@bitwarden/common/key-management/master-password/services/master-password.service";
 import { MasterPasswordSalt } from "@bitwarden/common/key-management/master-password/types/master-password.types";
@@ -25,15 +32,40 @@ import {
 import { ErrorResponse } from "@bitwarden/common/models/response/error.response";
 import { LogService } from "@bitwarden/common/platform/abstractions/log.service";
 import { SdkLoadService } from "@bitwarden/common/platform/abstractions/sdk/sdk-load.service";
-import { asUuid } from "@bitwarden/common/platform/abstractions/sdk/sdk.service";
+import { asUuid, SdkService } from "@bitwarden/common/platform/abstractions/sdk/sdk.service";
 import { compareValues } from "@bitwarden/common/platform/misc/compare-values";
+import { Rc } from "@bitwarden/common/platform/misc/reference-counting/rc";
+import { SyncService } from "@bitwarden/common/platform/sync";
 import { SyncResponse } from "@bitwarden/common/platform/sync/sync.response";
 import { FakeStateProvider, mockAccountServiceWith } from "@bitwarden/common/spec";
 import { UserId } from "@bitwarden/common/types/guid";
+import { UserKey } from "@bitwarden/common/types/key";
+import { CipherService } from "@bitwarden/common/vault/abstractions/cipher.service";
+import { FolderService } from "@bitwarden/common/vault/abstractions/folder/folder.service.abstraction";
+import { CipherType } from "@bitwarden/common/vault/enums";
+import { CipherData } from "@bitwarden/common/vault/models/data/cipher.data";
+import { FolderData } from "@bitwarden/common/vault/models/data/folder.data";
+import { Cipher } from "@bitwarden/common/vault/models/domain/cipher";
+import { Folder } from "@bitwarden/common/vault/models/domain/folder";
+import { CipherRequest } from "@bitwarden/common/vault/models/request/cipher.request";
+import { FolderRequest } from "@bitwarden/common/vault/models/request/folder.request";
+import { CipherView } from "@bitwarden/common/vault/models/view/cipher.view";
+import { FolderView } from "@bitwarden/common/vault/models/view/folder.view";
+import { CipherService as DefaultCipherService } from "@bitwarden/common/vault/services/cipher.service";
+import { DefaultCipherEncryptionService } from "@bitwarden/common/vault/services/default-cipher-encryption.service";
+import { FolderService as DefaultFolderService } from "@bitwarden/common/vault/services/folder/folder.service";
 import { DefaultKdfConfigService, KeyService } from "@bitwarden/key-management";
-// The services of the app derive the master key with these, as they do in the app.
+// The services of the app derive the master key, and rotate the user key, with these, as they do
+// in the app.
 // eslint-disable-next-line no-restricted-imports
-import { DefaultKeyGenerationService, fromSdkKdfConfig, KdfConfig } from "@bitwarden/legacy-crypto";
+import {
+  CryptoFunctionService,
+  DefaultKeyGenerationService,
+  EncryptService,
+  EncryptServiceImplementation,
+  fromSdkKdfConfig,
+  KdfConfig,
+} from "@bitwarden/legacy-crypto";
 // eslint-disable-next-line no-restricted-imports
 import { NodeCryptoFunctionService } from "@bitwarden/legacy-crypto/node";
 import {
@@ -50,6 +82,11 @@ import {
 // An account that the SDK can unlock, with its keys: the one that upstream tests the SDK with.
 // eslint-disable-next-line no-restricted-imports
 import { accountEncryptedV1 } from "../../../../../libs/importer/src/importers/spec-data/bitwarden-json/account-encrypted-v1.json";
+// eslint-disable-next-line no-restricted-imports
+import {
+  isRefusedForAChangedVault,
+  LocalVaultUserKeyRotationService,
+} from "../popup/local-vault-user-key-rotation.service";
 import { InMemoryLocalVaultFileSystem } from "../server/in-memory-local-vault-file-system";
 import { LocalResponse } from "../server/local-request";
 import { LocalServer } from "../server/local-server";
@@ -70,6 +107,33 @@ const NEW_MASTER_PASSWORD = "the master password after the change";
 // Argon2id with the least work that the encryption key settings of the extension and of the app
 // take, which keeps the tests fast.
 const ARGON2ID: Kdf = { argon2id: { iterations: 2, memory: 16, parallelism: 1 } };
+
+/** An item of the account in a folder, with an attachment, which a rotation encrypts again. */
+interface TestItem {
+  name: string;
+  username: string;
+  folderName: string;
+  attachmentName: string;
+  attachmentContent: Uint8Array;
+}
+
+/** An item with a key of its own, as the SDK makes one. */
+const ITEM: TestItem = {
+  name: "an item",
+  username: "the username",
+  folderName: "a folder",
+  attachmentName: "an attachment.txt",
+  attachmentContent: new Uint8Array([1, 2, 3, 250]),
+};
+
+/** An item from before items had keys of their own, which the user key itself encrypts. */
+const ITEM_WITHOUT_KEY: TestItem = {
+  name: "an older item",
+  username: "an older username",
+  folderName: "an older folder",
+  attachmentName: "an older attachment.txt",
+  attachmentContent: new Uint8Array([4, 5, 6]),
+};
 
 // What an SDK that makes no requests is given for the access token of the account.
 const NO_ACCESS_TOKEN = { get_access_token: async (): Promise<string | undefined> => undefined };
@@ -165,7 +229,7 @@ async function register(device: Device): Promise<void> {
     json: {
       email: EMAIL,
       userAsymmetricKeys: {
-        publicKey: "publicKey",
+        publicKey: publicKeyOfAccount(),
         encryptedPrivateKey: V1.accountCryptographicState.V1.private_key,
       },
       masterPasswordAuthentication: {
@@ -189,6 +253,32 @@ async function register(device: Device): Promise<void> {
   const vault = JSON.parse(utf8Decode(device.fileSystem.files.get(vaultFile)!));
   vault.sync.profile.id = USER_ID;
   device.fileSystem.files.set(vaultFile, utf8Encode(JSON.stringify(vault)));
+}
+
+/**
+ * The public key of the account: that of its private key, which the user key that the master
+ * password unlocks decrypts. The local vault refuses a rotation of the user key that would change
+ * it.
+ */
+function publicKeyOfAccount(): string {
+  const unlock = V1.method.masterPasswordUnlock.master_password_unlock;
+  const userKey = PureCrypto.decrypt_user_key_with_master_password(
+    unlock.masterKeyWrappedUserKey,
+    MASTER_PASSWORD,
+    unlock.salt,
+    PBKDF2,
+  );
+  const privateKey = PureCrypto.unwrap_decapsulation_key(
+    V1.accountCryptographicState.V1.private_key,
+    userKey,
+  );
+  return Buffer.from(PureCrypto.rsa_extract_public_key(privateKey)).toString("base64");
+}
+
+/** The private key of the account, as the file of the device has it: encrypted with the user key. */
+function wrappedPrivateKeyIn(device: Device): string {
+  const file = device.fileSystem.files.get(`${USER_ID}/devices/${device.id}/vault.json`)!;
+  return JSON.parse(utf8Decode(file)).sync.profile.privateKey;
 }
 
 /** `KdfJson` of the Android app: the settings in its requests, and in the vault. */
@@ -377,7 +467,14 @@ class AndroidApp implements Client {
    * settings that the vault was unlocked with.
    */
   async sync(): Promise<void> {
-    const sync = bodyOf(await request(this.device, "GET", "sync", { token: this.token }));
+    const response = await request(this.device, "GET", "sync", { token: this.token });
+    // The token from before a rotation of the user key is refused, and so is the refresh token
+    // that the app then asks for another one with, which logs the account out (`AuthTokenManager`).
+    if (response.code === 401) {
+      this.logOut();
+      return;
+    }
+    const sync = bodyOf(response);
     if (this.stamp != null && sync.profile.securityStamp !== this.stamp) {
       this.logOut();
       return;
@@ -549,6 +646,14 @@ class Extension implements Client {
   private loggedIn = true;
   private readonly masterPasswordUnlockService: DefaultMasterPasswordUnlockService;
   private readonly changePasswordService: DefaultChangePasswordService;
+  private readonly userKeyRotationService: LocalVaultUserKeyRotationService;
+  private readonly encryptService: EncryptService;
+  private readonly cipherEncryptionService: DefaultCipherEncryptionService;
+  /** The items and the folders of the last sync, which the state of the extension has. */
+  private ciphers: Cipher[] = [];
+  private folders: Folder[] = [];
+  /** What happens between the sync of a rotation and its request, if anything. */
+  private beforeRotationIsSent: (() => Promise<unknown>) | null = null;
 
   private constructor(
     readonly device: Device,
@@ -587,6 +692,89 @@ class Extension implements Client {
       this.masterPasswordUnlockService,
       mock<PolicyService>(),
       mock<OrganizationInviteService>(),
+    );
+    // What the rotation of the user key needs besides: the private key in the state, the sync of
+    // the page, what `ApiService.send` does, and the items and folders in the state, which the
+    // services of upstream encrypt again with the new key.
+    keyService.userEncryptedPrivateKey$.mockImplementation((userId) =>
+      stateProvider
+        .getUserState$(ACCOUNT_CRYPTOGRAPHIC_STATE, userId)
+        .pipe(map((state) => (state != null && "V1" in state ? state.V1.private_key : null))),
+    );
+    const syncService = mock<SyncService>();
+    syncService.fullSync.mockImplementation(async () => {
+      await this.sync();
+      return true;
+    });
+    const apiService = mock<ApiService>();
+    apiService.send.mockImplementation(async (method, path, body) => {
+      await this.beforeRotationIsSent?.();
+      const response = await request(device, method, path.substring(1), { token, json: body });
+      if (response.code !== 200) {
+        throw new ErrorResponse(bodyOf(response), response.code);
+      }
+    });
+    const cryptoFunctionService = new NodeCryptoFunctionService();
+    this.encryptService = new EncryptServiceImplementation(
+      cryptoFunctionService,
+      mock<LogService>(),
+      false,
+    );
+    // The SDK of the vault that is unlocked, as `DefaultSdkService` hands it out.
+    const sdkService = mock<SdkService>();
+    sdkService.userClient$.mockImplementation(() => of(new Rc(this.sdk!)));
+    this.cipherEncryptionService = new DefaultCipherEncryptionService(
+      sdkService,
+      mock<LogService>(),
+    );
+    // `getRotatedData` of the services of upstream, which encrypts with the SDK, on what they
+    // take from the state: the items that the SDK decrypts, and the folders that the user key
+    // decrypts. What they send is thus what the extension sends to the local vault.
+    const cipherService = mock<CipherService>();
+    cipherService.failedToDecryptCiphers$.mockImplementation(() =>
+      defer(async () => (await this.decryptCiphers())[1]),
+    );
+    cipherService.getRotatedData.mockImplementation((originalUserKey, newUserKey, userId) =>
+      DefaultCipherService.prototype.getRotatedData.call(
+        {
+          cipherViews$: () => defer(async () => (await this.decryptCiphers())[0]),
+          failedToDecryptCiphers$: cipherService.failedToDecryptCiphers$,
+          cipherEncryptionService: this.cipherEncryptionService,
+        } as unknown as DefaultCipherService,
+        originalUserKey,
+        newUserKey,
+        userId,
+      ),
+    );
+    const folderService = mock<FolderService>();
+    folderService.getRotatedData.mockImplementation((originalUserKey, newUserKey, userId) =>
+      DefaultFolderService.prototype.getRotatedData.call(
+        {
+          folderViews$: () => defer(() => this.decryptFolders()),
+          encrypt: DefaultFolderService.prototype.encrypt,
+          encryptService: this.encryptService,
+        } as unknown as DefaultFolderService,
+        originalUserKey,
+        newUserKey,
+        userId,
+      ),
+    );
+    const injector = Injector.create({
+      providers: [
+        { provide: ApiService, useValue: apiService },
+        { provide: CipherService, useValue: cipherService },
+        { provide: CryptoFunctionService, useValue: cryptoFunctionService },
+        { provide: EncryptService, useValue: this.encryptService },
+        { provide: FolderService, useValue: folderService },
+        { provide: KeyService, useValue: keyService },
+        { provide: InternalMasterPasswordServiceAbstraction, useValue: masterPasswordService },
+        { provide: MasterPasswordUnlockService, useValue: this.masterPasswordUnlockService },
+        { provide: SyncService, useValue: syncService },
+      ],
+    });
+    this.userKeyRotationService = runInInjectionContext(
+      injector,
+      () => new LocalVaultUserKeyRotationService(),
     );
   }
 
@@ -695,7 +883,121 @@ class Extension implements Client {
       return;
     }
     this.stamp = sync.profile!.securityStamp;
+    this.ciphers = sync.ciphers.map((cipher) => new Cipher(new CipherData(cipher)));
+    this.folders = sync.folders.map((folder) => new Folder(new FolderData(folder)));
     await this.createSdkIfSettingsChanged();
+  }
+
+  /** Adds a folder, as `FolderApiService.save` does, and returns its ID. */
+  async addFolder(name: string): Promise<string> {
+    const folder = new Folder();
+    folder.name = await this.encryptService.encryptString(name, await this.stateUserKey());
+    const response = await request(this.device, "POST", "folders", {
+      token: this.token,
+      json: new FolderRequest(folder),
+    });
+    return bodyOf(response).id;
+  }
+
+  /**
+   * Adds the item in a folder of its own, with its attachment. `withItemKey`: as the extension adds
+   * it, with a key of its own that the SDK makes (`CipherService.createWithServer`), or else as a
+   * client added it before items had keys, encrypted with the user key itself. The key of the
+   * item, or else the user key, encrypts the name of the attachment and its key, which encrypts
+   * its content (`CipherService.saveAttachmentRawWithServer`). Syncs then, so that the state has
+   * them.
+   */
+  async addItem(item: TestItem, withItemKey: boolean): Promise<void> {
+    const folderId = await this.addFolder(item.folderName);
+    const userKey = base64Decode(await this.userKey())!;
+    const saved = bodyOf(
+      await request(this.device, "POST", "ciphers", {
+        token: this.token,
+        json: withItemKey
+          ? await this.encryptedWithItemKey(item, folderId)
+          : {
+              type: CipherType.Login,
+              name: PureCrypto.symmetric_encrypt_string(item.name, userKey),
+              folderId,
+              login: { username: PureCrypto.symmetric_encrypt_string(item.username, userKey) },
+              encryptedFor: USER_ID,
+            },
+      }),
+    );
+    expect(saved.key != null).toBe(withItemKey);
+
+    const itemKey = withItemKey ? PureCrypto.unwrap_symmetric_key(saved.key, userKey) : userKey;
+    // A key of the kind of the user key, as that of an attachment is.
+    const attachmentKey = PureCrypto.make_user_key_aes256_cbc_hmac();
+    const content = PureCrypto.symmetric_encrypt_filedata(item.attachmentContent, attachmentKey);
+    const upload = bodyOf(
+      await request(this.device, "POST", `ciphers/${saved.id}/attachment/v2`, {
+        token: this.token,
+        json: {
+          fileName: PureCrypto.symmetric_encrypt_string(item.attachmentName, itemKey),
+          key: PureCrypto.wrap_symmetric_key(attachmentKey, itemKey),
+          fileSize: content.length,
+        },
+      }),
+    );
+    const uploaded = await fetch(
+      new Request(upload.url, { method: "PUT", body: content as BodyInit }),
+    );
+    expect(uploaded.status).toBe(201);
+    await this.sync();
+  }
+
+  /** The item in the folder, as the SDK of the extension encrypts it for the local vault. */
+  private async encryptedWithItemKey(item: TestItem, folderId: string): Promise<CipherRequest> {
+    const view = new CipherView();
+    view.type = CipherType.Login;
+    view.name = item.name;
+    view.folderId = folderId;
+    view.login.username = item.username;
+    return new CipherRequest((await this.cipherEncryptionService.encrypt(view, USER_ID))!);
+  }
+
+  /**
+   * The items and folders of the last sync, as the extension decrypts them, and the items that it
+   * cannot decrypt.
+   */
+  async decryptedVault(): Promise<{
+    items: CipherView[];
+    undecryptable: CipherView[];
+    folders: FolderView[];
+  }> {
+    const [items, undecryptable] = await this.decryptCiphers();
+    return { items, undecryptable, folders: await this.decryptFolders() };
+  }
+
+  /** The content of the attachment of the item, downloaded and decrypted by the SDK. */
+  async attachmentContent(item: CipherView): Promise<Uint8Array> {
+    const [attachment] = item.attachments;
+    const path = `ciphers/${item.id}/attachment/${attachment.id}`;
+    const download = bodyOf(await request(this.device, "GET", path, { token: this.token }));
+    const encrypted = new Uint8Array(await (await fetch(new Request(download.url))).arrayBuffer());
+    const cipher = this.ciphers.find((cipher) => cipher.id === item.id)!;
+    return this.sdk!.vault()
+      .attachments()
+      .decrypt_buffer(cipher.toSdkCipher(), attachment.toSdkAttachmentView(), encrypted);
+  }
+
+  /** The items of the last sync that the SDK decrypts, and those that it cannot decrypt. */
+  private decryptCiphers(): Promise<[CipherView[], CipherView[]]> {
+    return this.cipherEncryptionService.decryptManyLegacy(this.ciphers, USER_ID);
+  }
+
+  /** The folders of the last sync, decrypted with the user key, as `FolderService` does. */
+  private async decryptFolders(): Promise<FolderView[]> {
+    const userKey = await this.stateUserKey();
+    return await Promise.all(
+      this.folders.map((folder) => folder.decryptWithKey(userKey, this.encryptService)),
+    );
+  }
+
+  /** The user key in the state of the extension, once the vault is unlocked. */
+  private async stateUserKey(): Promise<UserKey> {
+    return (await firstValueFrom(this.stateProvider.getUserState$(USER_KEY, USER_ID)))!;
   }
 
   /**
@@ -729,6 +1031,36 @@ class Extension implements Client {
       },
       USER_ID,
     );
+    this.logOut();
+  }
+
+  /**
+   * Rotates the user key along with the master password, as `LocalVaultChangePasswordComponent`
+   * does once the form says so, and logs the account out once the local vault took it. Throws
+   * what the rotation throws, such as the `ErrorResponse` of a refusal. `inTheMeantime` happens
+   * after the page synced and encrypted everything again, before it sends the rotation.
+   */
+  async rotateUserKey(
+    password: string,
+    newPassword: string,
+    inTheMeantime?: () => Promise<unknown>,
+  ): Promise<void> {
+    this.beforeRotationIsSent = inTheMeantime ?? null;
+    try {
+      await this.userKeyRotationService.rotateUserKey(
+        {
+          currentPassword: password,
+          newPassword,
+          newPasswordHint: "",
+          kdfConfig: await this.kdfConfigService.getKdfConfig(USER_ID),
+          salt: await firstValueFrom(this.masterPasswordService.saltForUser$(USER_ID)),
+          rotateUserKey: true,
+        },
+        USER_ID,
+      );
+    } finally {
+      this.beforeRotationIsSent = null;
+    }
     this.logOut();
   }
 
@@ -1008,6 +1340,102 @@ describe("a master password that is changed after the KDF settings, without lock
 
     expect(browser.isLoggedIn).toBe(false);
     await expectOnlyNewMasterPassword((password) => Extension.logIn(browserDevice, password));
+  }, 60_000);
+
+  it("with a rotation of the user key in the browser, unlocks the account to the new key on both devices", async () => {
+    const { browserDevice, phoneDevice, browser, phone } = await browserAndPhone();
+
+    await browser.rotateUserKey(MASTER_PASSWORD, NEW_MASTER_PASSWORD);
+
+    expect(browser.isLoggedIn).toBe(false);
+    expect(await Extension.logIn(browserDevice, MASTER_PASSWORD)).toBeNull();
+    const rotated = (await Extension.logIn(browserDevice, NEW_MASTER_PASSWORD))!;
+    expect(rotated).not.toBeNull();
+    const newUserKey = await rotated.userKey();
+    expect(newUserKey).not.toBe(userKey);
+    // The private key of the account, encrypted with the new key. The SDK unlocks a vault whose
+    // private key it cannot decrypt all the same.
+    const privateKey = PureCrypto.unwrap_decapsulation_key(
+      wrappedPrivateKeyIn(browserDevice),
+      base64Decode(newUserKey)!,
+    );
+    const publicKey = Buffer.from(PureCrypto.rsa_extract_public_key(privateKey));
+    expect(publicKey.toString("base64")).toBe(publicKeyOfAccount());
+    expect(await rotated.lockAndUnlock(NEW_MASTER_PASSWORD)).toBe(true);
+    expect(await rotated.userKey()).toBe(newUserKey);
+
+    // The phone, which has the user key before, is logged out once the rotation came to it, and
+    // logged in to with the new master password only, to the new key.
+    await phone.sync();
+    expect(phone.isLoggedIn).toBe(true);
+    syncFolder(browserDevice, phoneDevice);
+    await phone.sync();
+    expect(phone.isLoggedIn).toBe(false);
+    expect(await AndroidApp.logIn(phoneDevice, MASTER_PASSWORD)).toBeNull();
+    const phoneAfter = (await AndroidApp.logIn(phoneDevice, NEW_MASTER_PASSWORD))!;
+    expect(phoneAfter).not.toBeNull();
+    expect(await phoneAfter.userKey()).toBe(newUserKey);
+    expect(await phoneAfter.lockAndUnlock(NEW_MASTER_PASSWORD)).toBe(true);
+  }, 60_000);
+
+  it("with a rotation of the user key in the browser, decrypts every item, folder and attachment with the new key", async () => {
+    const browserDevice = createBrowserDevice();
+    await register(browserDevice);
+    const browser = (await Extension.logIn(browserDevice, MASTER_PASSWORD))!;
+    await browser.addItem(ITEM, true);
+    await browser.addItem(ITEM_WITHOUT_KEY, false);
+    const before = await browser.decryptedVault();
+    expect(before.undecryptable).toEqual([]);
+    expect(before.items).toHaveLength(2);
+
+    await browser.rotateUserKey(MASTER_PASSWORD, NEW_MASTER_PASSWORD);
+
+    // The extension that is logged in again has the new key only, which decrypts everything that
+    // the services of upstream encrypted again, and the local vault took: the key of an item, or
+    // else the item itself and the key of its attachment.
+    const rotated = (await Extension.logIn(browserDevice, NEW_MASTER_PASSWORD))!;
+    expect(await rotated.userKey()).not.toBe(userKey);
+    const after = await rotated.decryptedVault();
+    expect(after.undecryptable).toEqual([]);
+    expect(after.items).toHaveLength(2);
+    for (const expected of [ITEM, ITEM_WITHOUT_KEY]) {
+      const item = after.items.find((item) => item.name === expected.name)!;
+      const itemBefore = before.items.find((item) => item.name === expected.name)!;
+      expect(item.id).toBe(itemBefore.id);
+      expect(item.folderId).toBe(itemBefore.folderId);
+      expect(after.folders.find((folder) => folder.id === item.folderId)?.name).toBe(
+        expected.folderName,
+      );
+      expect(item.login.username).toBe(expected.username);
+      expect(item.attachments.map((attachment) => attachment.fileName)).toEqual([
+        expected.attachmentName,
+      ]);
+      expect([...(await rotated.attachmentContent(item))]).toEqual([...expected.attachmentContent]);
+    }
+  }, 60_000);
+
+  it("with a rotation of the user key in the browser that the vault changed under, is refused until it is tried again after a sync", async () => {
+    const browserDevice = createBrowserDevice();
+    await register(browserDevice);
+    const browser = (await Extension.logIn(browserDevice, MASTER_PASSWORD))!;
+
+    // A folder comes in after the page synced, as from another device, which the rotation that it
+    // sends does not have.
+    const refused = await browser
+      .rotateUserKey(MASTER_PASSWORD, NEW_MASTER_PASSWORD, () =>
+        browser.addFolder("a folder from another device"),
+      )
+      .catch((error: unknown) => error);
+
+    // The page syncs, and asks to try again.
+    expect(isRefusedForAChangedVault(refused)).toBe(true);
+    expect(browser.isLoggedIn).toBe(true);
+    expect(await Extension.logIn(browserDevice, NEW_MASTER_PASSWORD)).toBeNull();
+    await browser.sync();
+    await browser.rotateUserKey(MASTER_PASSWORD, NEW_MASTER_PASSWORD);
+    const rotated = (await Extension.logIn(browserDevice, NEW_MASTER_PASSWORD))!;
+    const after = await rotated.decryptedVault();
+    expect(after.folders.map((folder) => folder.name)).toEqual(["a folder from another device"]);
   }, 60_000);
 
   // What the Android app avoids. These fail once its SDK derives the master key of a new master

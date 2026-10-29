@@ -27,6 +27,11 @@ import { PopupPageComponent } from "../../platform/popup/layout/popup-page.compo
 
 import { keepAtTop } from "./keep-at-top";
 import { provideLocalVaultHintText } from "./local-vault-hint-text";
+import {
+  isRefusedForAChangedVault,
+  LocalVaultUserKeyRotationService,
+  UndecryptableItemsError,
+} from "./local-vault-user-key-rotation.service";
 
 /**
  * Changes the master password of the account. Upstream has this page in the extension
@@ -38,6 +43,11 @@ import { provideLocalVaultHintText } from "./local-vault-hint-text";
  * master password, which is derived with the same settings, and sent to the local server
  * (`POST accounts/password`), which gives the account a new security stamp. The account is then
  * logged out, as upstream does, to be logged in to with the new master password.
+ *
+ * The form offers to rotate the user key along with it, as it does in the web vault of upstream,
+ * which is what locks out whoever knows the old master password: the user key is replaced, and
+ * everything that it encrypts is encrypted again with the new one
+ * (`LocalVaultUserKeyRotationService`).
  *
  * What the form says about the master password hint is that of the local vault
  * (`provideLocalVaultHintText`).
@@ -61,6 +71,7 @@ export class LocalVaultChangePasswordComponent implements OnInit {
   private readonly accountService = inject(AccountService);
   private readonly syncService = inject(SyncService);
   private readonly changePasswordService = inject(ChangePasswordService);
+  private readonly userKeyRotationService = inject(LocalVaultUserKeyRotationService);
   private readonly logoutService = inject(LogoutService);
   private readonly router = inject(Router);
   private readonly toastService = inject(ToastService);
@@ -68,7 +79,8 @@ export class LocalVaultChangePasswordComponent implements OnInit {
   private readonly i18nService = inject(I18nService);
   private readonly logService = inject(LogService);
 
-  protected readonly inputPasswordFlow = InputPasswordFlow.ChangePassword;
+  protected readonly inputPasswordFlow =
+    InputPasswordFlow.ChangePasswordWithOptionalUserKeyRotation;
   protected readonly loading = signal(true);
   protected readonly submitting = signal(false);
   /** The account whose master password is changed, once it has synced. */
@@ -96,11 +108,18 @@ export class LocalVaultChangePasswordComponent implements OnInit {
       return;
     }
     this.submitting.set(true);
+    const rotatesUserKey = passwordInputResult.rotateUserKey === true;
     try {
-      await this.changePasswordService.changePassword(passwordInputResult, account.id);
+      if (rotatesUserKey) {
+        await this.userKeyRotationService.rotateUserKey(passwordInputResult, account.id);
+      } else {
+        await this.changePasswordService.changePassword(passwordInputResult, account.id);
+      }
       this.toastService.showToast({
         variant: "success",
-        message: this.i18nService.t("masterPasswordChanged"),
+        message: rotatesUserKey
+          ? "Your master password was changed and your encryption key rotated."
+          : this.i18nService.t("masterPasswordChanged"),
       });
       // As upstream. The new security stamp would log the account out at its next sync anyway,
       // as it does on the other devices.
@@ -117,10 +136,21 @@ export class LocalVaultChangePasswordComponent implements OnInit {
           variant: "error",
           message: this.i18nService.t("invalidMasterPassword"),
         });
-      } else if (error instanceof ErrorResponse && error.statusCode === 400) {
-        await this.syncAfterRefusal(account);
+      } else if (error instanceof UndecryptableItemsError) {
+        this.toastService.showToast({
+          variant: "error",
+          message:
+            "Some items cannot be decrypted. Delete them before you rotate the encryption key.",
+        });
+      } else if (
+        error instanceof ErrorResponse &&
+        error.statusCode === 400 &&
+        (!rotatesUserKey || isRefusedForAChangedVault(error))
+      ) {
+        await this.syncAfterRefusal(account, rotatesUserKey);
       } else {
-        // Such as that the vault folder cannot be reached.
+        // Such as that the vault folder cannot be reached, or a refusal of a rotation that another
+        // attempt would get as well, which the message of the local server says the reason of.
         this.validationService.showError(error);
       }
     } finally {
@@ -135,11 +165,16 @@ export class LocalVaultChangePasswordComponent implements OnInit {
    * than the one that the settings of the app derive. Upstream would show the message of the
    * server, "Invalid master password."
    *
-   * A change of the settings comes with the sync, and the next attempt is made with them. A change
-   * of the master password logs the account out at the sync instead, which leaves nothing to try
-   * again here.
+   * A rotation of the user key is refused as well when the vault has an item or a folder that it
+   * does not have, or one that changed since, which another device added or changed since the
+   * page synced (`isRefusedForAChangedVault`). Another refusal of a rotation would come again,
+   * and its message is shown instead.
+   *
+   * A change of the settings, or of the vault, comes with the sync, and the next attempt is made
+   * with them. A change of the master password logs the account out at the sync instead, which
+   * leaves nothing to try again here.
    */
-  private async syncAfterRefusal(account: Account) {
+  private async syncAfterRefusal(account: Account, rotatesUserKey: boolean) {
     await this.syncService.fullSync(false);
     const activeAccount = await firstValueFrom(this.accountService.activeAccount$);
     if (activeAccount?.id !== account.id) {
@@ -147,7 +182,9 @@ export class LocalVaultChangePasswordComponent implements OnInit {
     }
     this.toastService.showToast({
       variant: "error",
-      message: "Your encryption key settings were changed on another device. Try again.",
+      message: rotatesUserKey
+        ? "Your vault was changed on another device. Try again."
+        : "Your encryption key settings were changed on another device. Try again.",
     });
   }
 }
