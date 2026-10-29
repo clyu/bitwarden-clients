@@ -83,14 +83,14 @@ password, which is derived with the same settings, and sent to the local server
 (`POST accounts/password`) along with what the new master password is recognized by and its hint.
 The local server keeps them in place of the ones before, and gives the account a new security
 stamp. The user key stays the same, so the items do not change, and whoever knows the old master
-password is not locked out (see "Limits"). The extension then logs out, as upstream does, to be
-logged in to with the new master password. The page has the texts of upstream, but for what it
-says about the vault folder, which is in English only. That includes what the form says under the
-field of the hint: upstream says that the hint can be sent to the email of the account, which does
-not happen here, as the local server answers a request for the hint with the hint itself, and
-whoever can read the vault folder can read it there. The page gives the form the messages of the app
-with that one replaced (`popup/local-vault-hint-text.ts`), so that the form stays as upstream has
-it.
+password is not locked out, unless the user key is rotated as well (below). The extension then
+logs out, as upstream does, to be logged in to with the new master password. The page has the
+texts of upstream, but for what it says about the vault folder, which is in English only. That
+includes what the form says under the field of the hint: upstream says that the hint can be sent to
+the email of the account, which does not happen here, as the local server answers a request for
+the hint with the hint itself, and whoever can read the vault folder can read it there. The page
+gives the form the messages of the app with that one replaced (`popup/local-vault-hint-text.ts`),
+so that the form stays as upstream has it.
 
 The other devices that share the vault folder are logged out at their next sync after the change
 has come to them, when they find the new security stamp, and not within an hour, as with a
@@ -103,6 +103,40 @@ this one out. If the local server refuses the change all the same, as another de
 settings since, the page syncs again and asks the user to try again, in place of the message of the
 local server, "Invalid master password.": the master password was checked to be right before the
 change was sent. If that sync logs the account out, the page says nothing.
+
+### Rotating the encryption key
+
+The form offers to rotate the encryption key of the account along with the master password, as the
+web vault does ("Also rotate my account's encryption key"), which is what locks out whoever knows
+the old master password. The page then does what the web vault does for an account of encryption
+version 1 (`popup/local-vault-user-key-rotation.service.ts`, after `UserKeyRotationService` of
+`apps/web`, which the extension does not have): it syncs, makes a new user key, encrypts with it
+again the private key of the account, and every item and folder with the services of upstream
+(`getRotatedData`), encrypts the new key with the master key of the new master password, which is
+derived with the same settings, and sends it all to the local server at once
+(`POST accounts/key-management/rotate-user-account-keys`). The account stays at encryption version
+1, as the web vault keeps it while `force-upgrade-v2-encryption` is off, which the local server does
+not report: the Android app and the extension on other devices have such accounts. The extension
+then logs out, to be logged in to with the new master password, which unlocks the new key.
+
+The local server refuses a rotation that does not have every item and folder of the vault, or with
+an item that changed since the page synced, as another device added or changed it in the meantime,
+or with how the master key is derived from before a change on another device: the page syncs again
+and asks to try again (`isRefusedForAChangedVault`, by the message of the local server). It does not
+check a folder for a change: a name that another device gave a folder in the meantime is replaced by
+the one before. Every other refusal comes again at the next attempt, such as one of a rotation that
+leaves out the key of an attachment, and the page shows the message of the local server. An item
+that cannot be decrypted keeps the key from being rotated, as in upstream, and the page says so.
+Once the rotation has come to another device that shares the vault folder, the local server there
+refuses the tokens from before it, which logs the account out before the device writes anything with
+the key before, and the new master password logs in to it with the new key. The extension logs out
+for good then, which does not keep the PIN, as it unlocks the key before. The Android app keeps the
+PIN after such a logout in upstream, and does not in this fork. What a device changes before the
+rotation comes to it is lost, and an item that it adds then cannot be decrypted with the new key
+(`docs/DESIGN.md` of `local-vault-rs`, "Rotating the user key"). A device whose extension or Android
+app does not know of rotated keys cannot use the account until it is updated, as the file of this
+device is of a layout that it does not know (see "Updating the local vault"). The page says that in
+English, as its other texts about the vault folder.
 
 ## Changing how the master key is derived
 
@@ -226,6 +260,11 @@ nothing else goes wrong there. So the Android app is released with such a change
 extension, or at the same time, and not after it: a browser can update the extension before the
 user has updated the app.
 
+Rotating the user key is such a change as well: the file of the device that rotates it, and every
+file that a device writes with the new key, is of version 4 (`LOCAL_VAULT_FORMAT.md`, "Rotating the
+user key"), which a client from before cannot read. It cannot use the account until it is updated,
+and nothing else goes wrong there.
+
 Version 2, in which every device writes a directory of its own, was such a change. The first write
 of an updated client took a vault of version 1, which the `vault.json` of an account held whole,
 over into the file of its device. The local vault no longer reads version 1 since the commit
@@ -266,12 +305,15 @@ email that no other account has, fail until the directory is deleted by hand.
      does not follow.
    - `local-sdk-client` does the same with the SDK itself, which fails when an update of the SDK
      changes what it sends or what it accepts back.
-   - `local-vault-master-password` changes the encryption key settings and then the master
-     password without locking in between, in the extension and in the Android app, on one device
-     and on two that share the vault folder: with the services of the extension, and with what
-     the app asks of its SDK and sends. It fails when an update of the SDK, of the local vault or
-     of those services leaves an account that the new master password does not log in to and
-     unlock on every device.
+   - `local-vault-master-password` changes the encryption key settings and then the master password
+     without locking in between, in the extension and in the Android app, on one device and on two
+     that share the vault folder: with the services of the extension, and with what the app asks of
+     its SDK and sends. It also rotates the user key in the extension, with items in folders and
+     with attachments that the services of upstream encrypt again (`getRotatedData`), an item with a
+     key of its own and one from before items had keys, and once more after a refusal. It fails when
+     an update of the SDK, of the local vault or of those services leaves an account that the new
+     master password does not log in to and unlock on every device, or an item, a folder or an
+     attachment that the new key does not decrypt.
    - `manifest` fails when a merge took something out of the manifests that the local vault
      helper needs.
    - `local-vault-helper` runs the helper with `python3`, and checks it, with what the extension
@@ -313,7 +355,8 @@ it was deleted and comes back later than that brings it back. In addition:
   browsers, but nothing was tried, and the helper is only installed for Firefox. The manifest of
   version 3 has the same changes, but was not tried either: there the browser stops the
   background when it is idle, which the local server was not made for.
-- Changing the master password is not enough if someone else may know the old one. The user key
+- Changing the master password alone is not enough if someone else may know the old one: rotate
+  the encryption key along with it (see "Rotating the encryption key"). Otherwise the user key
   stays the same, and the vault folder keeps it encrypted with the old master password: in the
   directory of every device until that device next changes the vault, or syncs a day or more
   after it last looked through its file for what other devices replaced, which it also does at
@@ -328,8 +371,8 @@ it was deleted and comes back later than that brings it back. In addition:
   that it switches to is locked with a PIN that has "Require master password on browser restart" on.
   The backup of its file then holds the old one until the extension next writes that file. Whoever
   has the old master password and a copy of the folder can decrypt the vault, items added since
-  included. Export the vault, import it into a new account, and delete the old account, which
-  deletes the files of every device, and what a tool that syncs the folder left in its directory.
+  included. After a rotation, they can still decrypt what the vault held before it, in such a copy,
+  but nothing that is added or changed with the new key.
 - Stronger encryption key settings do not protect a copy of the vault folder that was taken
   before. The user key encrypted with the master key of the settings before stays in the vault
   folder in the same places as after a change of the master password, and the master password is

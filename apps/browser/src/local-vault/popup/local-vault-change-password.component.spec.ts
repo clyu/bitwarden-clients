@@ -34,6 +34,10 @@ import { KdfConfigService } from "@bitwarden/key-management";
 import { PopupRouterCacheService } from "../../platform/popup/view-cache/popup-router-cache.service";
 
 import { LocalVaultChangePasswordComponent } from "./local-vault-change-password.component";
+import {
+  LocalVaultUserKeyRotationService,
+  UndecryptableItemsError,
+} from "./local-vault-user-key-rotation.service";
 
 const USER_ID = "user-id" as UserId;
 const EMAIL = "user@example.com";
@@ -45,6 +49,12 @@ const PASSWORD_INPUT_RESULT: PasswordInputResult = {
   newPasswordHint: "the hint",
 };
 
+/** What the form gives once the user also chose to rotate the encryption key of the account. */
+const ROTATION_INPUT_RESULT: PasswordInputResult = {
+  ...PASSWORD_INPUT_RESULT,
+  rotateUserKey: true,
+};
+
 /**
  * The page of account security that changes the master password, with the services of the app
  * standing in for the real ones.
@@ -53,6 +63,7 @@ describe("the page that changes the master password", () => {
   let accountService: FakeAccountService;
   let syncService: MockProxy<SyncService>;
   let changePasswordService: MockProxy<ChangePasswordService>;
+  let userKeyRotationService: MockProxy<LocalVaultUserKeyRotationService>;
   let logoutService: MockProxy<LogoutService>;
   let toastService: MockProxy<ToastService>;
   let validationService: MockProxy<ValidationService>;
@@ -65,6 +76,8 @@ describe("the page that changes the master password", () => {
     changePasswordService = mock<ChangePasswordService>();
     changePasswordService.changePassword.mockResolvedValue();
     changePasswordService.shouldNavigateToRoot.mockReturnValue(true);
+    userKeyRotationService = mock<LocalVaultUserKeyRotationService>();
+    userKeyRotationService.rotateUserKey.mockResolvedValue();
     logoutService = mock<LogoutService>();
     toastService = mock<ToastService>();
     validationService = mock<ValidationService>();
@@ -79,6 +92,7 @@ describe("the page that changes the master password", () => {
         { provide: AccountService, useValue: accountService },
         { provide: SyncService, useValue: syncService },
         { provide: ChangePasswordService, useValue: changePasswordService },
+        { provide: LocalVaultUserKeyRotationService, useValue: userKeyRotationService },
         { provide: LogoutService, useValue: logoutService },
         { provide: ToastService, useValue: toastService },
         { provide: ValidationService, useValue: validationService },
@@ -158,11 +172,14 @@ describe("the page that changes the master password", () => {
     const form: InputPasswordComponent = fixture.debugElement.query(
       By.directive(InputPasswordComponent),
     ).componentInstance;
-    expect(form.flow).toBe(InputPasswordFlow.ChangePassword);
+    // The one that the web vault has, which offers to rotate the encryption key as well.
+    expect(form.flow).toBe(InputPasswordFlow.ChangePasswordWithOptionalUserKeyRotation);
     expect(form.userId).toBe(USER_ID);
     expect(form.email).toBe(EMAIL);
     const currentPassword = "#input-password-form_current-password";
     expect(fixture.nativeElement.querySelector(currentPassword)).not.toBeNull();
+    const rotateUserKey = "#input-password-form_rotate-user-key";
+    expect(fixture.nativeElement.querySelector(rotateUserKey)).not.toBeNull();
   });
 
   it("changes the master password, and logs out to log in with the new one", async () => {
@@ -184,6 +201,90 @@ describe("the page that changes the master password", () => {
     );
     expect(navigate).toHaveBeenCalledWith(["/"]);
     expect(changePasswordService.closeBrowserExtensionPopout).toHaveBeenCalled();
+    expect(component["submitting"]()).toBe(false);
+  });
+
+  it("rotates the encryption key along with the master password, and logs out", async () => {
+    const component = await open();
+
+    await component["changePassword"](ROTATION_INPUT_RESULT);
+
+    expect(userKeyRotationService.rotateUserKey).toHaveBeenCalledWith(
+      ROTATION_INPUT_RESULT,
+      USER_ID,
+    );
+    expect(changePasswordService.changePassword).not.toHaveBeenCalled();
+    expect(toastService.showToast).toHaveBeenCalledWith({
+      variant: "success",
+      message: "Your master password was changed and your encryption key rotated.",
+    });
+    expect(logoutService.logout).toHaveBeenCalledWith(USER_ID, "passwordChanged");
+    expect(userKeyRotationService.rotateUserKey.mock.invocationCallOrder[0]).toBeLessThan(
+      logoutService.logout.mock.invocationCallOrder[0],
+    );
+    expect(navigate).toHaveBeenCalledWith(["/"]);
+    expect(component["submitting"]()).toBe(false);
+  });
+
+  it("says that items that cannot be decrypted keep the key from being rotated", async () => {
+    userKeyRotationService.rotateUserKey.mockRejectedValue(new UndecryptableItemsError());
+    const component = await open();
+
+    await component["changePassword"](ROTATION_INPUT_RESULT);
+
+    expect(toastService.showToast).toHaveBeenCalledWith({
+      variant: "error",
+      message: "Some items cannot be decrypted. Delete them before you rotate the encryption key.",
+    });
+    expect(logoutService.logout).not.toHaveBeenCalled();
+    expect(component["submitting"]()).toBe(false);
+  });
+
+  it("syncs once the local server refused the rotation, and asks to try again", async () => {
+    // What the local server answers when another device added an item since the sync, which the
+    // rotation does not have.
+    const refused = new ErrorResponse(
+      {
+        message:
+          "Some items or folders were not encrypted with the new key. Sync your vault and try again.",
+      },
+      400,
+    );
+    userKeyRotationService.rotateUserKey.mockRejectedValue(refused);
+    const component = await open();
+    syncService.fullSync.mockClear();
+
+    await component["changePassword"](ROTATION_INPUT_RESULT);
+
+    expect(syncService.fullSync).toHaveBeenCalledWith(false);
+    expect(toastService.showToast).toHaveBeenCalledWith({
+      variant: "error",
+      message: "Your vault was changed on another device. Try again.",
+    });
+    expect(validationService.showError).not.toHaveBeenCalled();
+    expect(logoutService.logout).not.toHaveBeenCalled();
+    expect(component["submitting"]()).toBe(false);
+  });
+
+  it("shows why the local server refused a rotation that another attempt would not get past", async () => {
+    // What the local server answers a rotation with keys that it does not take.
+    const refused = new ErrorResponse(
+      {
+        message:
+          "A local vault does not take the keys of encryption version 2, which come with signing keys.",
+      },
+      400,
+    );
+    userKeyRotationService.rotateUserKey.mockRejectedValue(refused);
+    const component = await open();
+    syncService.fullSync.mockClear();
+
+    await component["changePassword"](ROTATION_INPUT_RESULT);
+
+    expect(validationService.showError).toHaveBeenCalledWith(refused);
+    expect(syncService.fullSync).not.toHaveBeenCalled();
+    expect(toastService.showToast).not.toHaveBeenCalled();
+    expect(logoutService.logout).not.toHaveBeenCalled();
     expect(component["submitting"]()).toBe(false);
   });
 
